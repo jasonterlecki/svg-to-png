@@ -1,0 +1,50 @@
+{
+  "name": "svg-to-png",
+  "version": "1.0.0",
+  "description": "Headless browser powered SVG to raster (PNG/JPEG/WebP) converter with CLI and library APIs.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "svg2raster": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format": "prettier --write \"{src,tests}/**/*.ts\" \"*.{md,json}\"",
+    "format:check": "prettier --check \"{src,tests}/**/*.ts\" \"*.{md,json}\"",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "prepare": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jasonterlecki/svg-to-png.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/jasonterlecki/svg-to-png/issues"
+  },
+  "homepage": "https://github.com/jasonterlecki/svg-to-png#readme",
+  "dependencies": {
+    "commander": "^14.0.2",
+    "fast-glob": "^3.3.3",
+    "playwright": "^1.57.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@typescript-eslint/eslint-plugin": "^8.48.0",
+    "@typescript-eslint/parser": "^8.48.0",
+    "@vitest/coverage-v8": "^4.0.14",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "prettier": "^3.7.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  }
+}
