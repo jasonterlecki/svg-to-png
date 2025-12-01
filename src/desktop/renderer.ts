@@ -1,4 +1,4 @@
-import type { Svg2RasterApi } from './preload.js';
+import type { Svg2RasterApi } from './preloadTypes.js';
 import type { UiRenderOptions } from './ipc.js';
 
 declare global {
@@ -76,7 +76,7 @@ convertBtn?.addEventListener('click', async () => {
       showStatus(`Converted ${result.successes} file(s).`, 'success');
     } else {
       const failureDetails = result.failures
-        .map((failure) => `${failure.path}: ${failure.error}`)
+        .map((failure: { path: string; error: string }) => `${failure.path}: ${failure.error}`)
         .join('\n');
       showStatus(
         `Converted ${result.successes} file(s). ${result.failures.length} failed:\n${failureDetails}`,
