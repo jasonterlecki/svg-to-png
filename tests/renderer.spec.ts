@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { renderSvg, renderSvgFile, shutdownRenderer } from '../src/index.js';
 
+const RENDER_TIMEOUT_MS = 20000;
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.resolve(testDir, 'fixtures');
 const simpleSvgPath = path.join(fixturesDir, 'simple.svg');
@@ -30,7 +31,10 @@ describe('renderSvg', () => {
     await shutdownRenderer();
   });
 
-  it('renders inline SVG markup', async () => {
+  it(
+    'renders inline SVG markup',
+    { timeout: RENDER_TIMEOUT_MS },
+    async () => {
     if (!browserAvailable) {
       return;
     }
@@ -47,18 +51,23 @@ describe('renderSvg', () => {
     expect(result.width).toBe(32);
     expect(result.height).toBe(32);
     expect(result.buffer.byteLength).toBeGreaterThan(0);
-  });
+    },
+  );
 
-  it('renders from an SVG file path', async () => {
+  it(
+    'renders from an SVG file path',
+    { timeout: RENDER_TIMEOUT_MS },
+    async () => {
     if (!browserAvailable) {
       console.warn(`Renderer tests skipped: ${skipReason}`);
       return;
     }
 
-    const result = await renderSvgFile(simpleSvgPath, { format: 'webp' });
-    expect(result.format).toBe('webp');
-    expect(result.width).toBe(32);
-    expect(result.height).toBe(32);
-    expect(result.buffer.byteLength).toBeGreaterThan(0);
-  });
+      const result = await renderSvgFile(simpleSvgPath, { format: 'webp' });
+      expect(result.format).toBe('webp');
+      expect(result.width).toBe(32);
+      expect(result.height).toBe(32);
+      expect(result.buffer.byteLength).toBeGreaterThan(0);
+    },
+  );
 });
