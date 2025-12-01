@@ -16,6 +16,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 app.commandLine.appendSwitch('disable-gpu');
 app.commandLine.appendSwitch('disable-software-rasterizer');
 app.commandLine.appendSwitch('disable-gpu-compositing');
+app.disableHardwareAcceleration();
 let mainWindow: BrowserWindow | null = null;
 interface ConversionContext {
   cancelled: boolean;
