@@ -121,6 +121,24 @@ Available options:
 
 All CLI options ultimately map to the same rendering options described in the library section, so refer there for further detail. The CLI automatically shuts down the shared Playwright browser once all jobs finish.
 
+## Desktop app
+
+Prefer a visual interface? Launch the Electron desktop experience after building:
+
+```bash
+npm run desktop
+```
+
+The app lets you pick SVG files (or drag them in), choose an output directory, tweak format/dimension/scale/background/time options, and run conversions while viewing status updates. It shares the same rendering engine under the hood, so Playwright’s Chromium binary must still be installed (`npx playwright install --with-deps chromium`).
+
+### Electron structure
+
+- `src/desktop/main.ts` – Electron main process that wires IPC handlers and executes the renderer.
+- `src/desktop/preload.ts` – Exposes a secure API to the renderer window.
+- `src/desktop/renderer.ts` + `desktop/index.html` – The UI for selecting files, specifying options, and triggering conversions.
+
+When you run `npm run desktop`, the TypeScript build runs first, then Electron boots the compiled files from `dist/desktop/`.
+
 ## Development workflow
 
 | Command | Purpose |

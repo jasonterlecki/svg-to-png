@@ -15,7 +15,8 @@
     "format:check": "prettier --check \"{src,tests}/**/*.ts\" \"*.{md,json}\"",
     "test": "vitest run",
     "test:watch": "vitest watch",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "desktop": "npm run build && electron dist/desktop/main.js"
   },
   "repository": {
     "type": "git",
@@ -36,10 +37,13 @@
     "sharp": "^0.34.5"
   },
   "devDependencies": {
+    "@types/electron": "^1.4.38",
     "@types/node": "^24.10.1",
     "@typescript-eslint/eslint-plugin": "^8.48.0",
     "@typescript-eslint/parser": "^8.48.0",
     "@vitest/coverage-v8": "^4.0.14",
+    "electron": "^39.2.4",
+    "electron-builder": "^26.0.12",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
