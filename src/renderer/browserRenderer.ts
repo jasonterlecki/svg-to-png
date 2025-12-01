@@ -1,3 +1,6 @@
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import process from 'node:process';
 import { chromium, type Browser, type LaunchOptions } from 'playwright';
 import { DEFAULT_NAVIGATION_TIMEOUT_MS, SUPPORTED_FORMATS } from '../config.js';
@@ -5,6 +8,11 @@ import { buildSvgPage } from './svgPageTemplate.js';
 import { deriveDimensions } from '../utils/svg.js';
 import type { OutputFormat, RenderOptions, RenderResult } from '../types.js';
 import { convertPngBuffer } from '../utils/raster.js';
+
+const require = createRequire(import.meta.url);
+if (!process.env.PLAYWRIGHT_BROWSERS_PATH) {
+  process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
+}
 
 export interface BrowserRendererOptions {
   headless?: boolean;
@@ -47,6 +55,7 @@ export class BrowserRenderer {
     const forceConstrained = process.env.SVG2RASTER_FORCE_MINIMAL_CHROMIUM === '1';
     const attemptArgsList = forceConstrained ? [constrainedArgs] : [baseArgs, constrainedArgs];
     let lastError: unknown;
+    let installAttempted = false;
 
     for (const candidateArgs of attemptArgsList) {
       try {
@@ -62,6 +71,11 @@ export class BrowserRenderer {
         });
       } catch (error) {
         lastError = error;
+        if (!installAttempted && isMissingExecutableError(error)) {
+          installAttempted = true;
+          await installChromiumBrowser();
+          continue;
+        }
       }
     }
 
@@ -181,4 +195,33 @@ export class BrowserRenderer {
       await context.close();
     }
   }
+}
+
+function isMissingExecutableError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return message.includes('executable doesn\'t exist') || message.includes('failed to launch chromium');
+}
+
+async function installChromiumBrowser(): Promise<void> {
+  const playwrightPackageJsonPath = require.resolve('playwright/package.json');
+  const playwrightDir = path.dirname(playwrightPackageJsonPath);
+  const playwrightPackage = require('playwright/package.json') as { bin?: Record<string, string> };
+  const binRelative = playwrightPackage.bin?.playwright ?? 'cli.js';
+  const cliPath = path.resolve(playwrightDir, binRelative);
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(process.execPath, [cliPath, 'install', 'chromium'], {
+      stdio: 'inherit',
+    });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`Playwright install exited with code ${code}`));
+      }
+    });
+  });
 }
