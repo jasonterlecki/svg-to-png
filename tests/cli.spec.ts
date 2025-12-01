@@ -83,7 +83,7 @@ describe('CLI', () => {
     ]);
 
     const files = await fs.readdir(outDir);
-    expect(files.sort()).toEqual(['a.jpeg', 'b.jpeg']);
+    expect(files.sort()).toEqual(['a.jpg', 'b.jpg']);
     expect(renderSvgFileMock).toHaveBeenCalledTimes(2);
   });
 

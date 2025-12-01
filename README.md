@@ -111,7 +111,7 @@ Available options:
 | `<inputs...>` | One or more SVG file paths or glob patterns. Quote glob patterns so your shell does not expand them. |
 | `-o, --out <file>` | Output file path (only when processing a single input). |
 | `--out-dir <dir>` | Destination directory for batch conversion. The original filenames are preserved, but the extension changes to match the output format. |
-| `-f, --format <png|jpeg|webp>` | Output format (default `png`). |
+| `-f, --format <png|jpeg|webp>` | Output format (default `png`). JPEG outputs use the standard `.jpg` extension. |
 | `-w, --width <px>` / `-h, --height <px>` | Override the rendered dimensions. If one dimension is omitted, the SVG aspect ratio determines the other. |
 | `-s, --scale <factor>` | Device pixel ratio (e.g., `2` for “@2x”). |
 | `-b, --background <color>` | Background color or `"transparent"` (default). |

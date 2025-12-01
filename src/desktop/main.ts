@@ -16,6 +16,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 app.commandLine.appendSwitch('disable-gpu');
 app.commandLine.appendSwitch('disable-software-rasterizer');
 app.commandLine.appendSwitch('disable-gpu-compositing');
+app.commandLine.appendSwitch('disable-logging');
+app.commandLine.appendSwitch('log-level', '3');
 app.disableHardwareAcceleration();
 let mainWindow: BrowserWindow | null = null;
 interface ConversionContext {
@@ -171,7 +173,8 @@ async function convertFiles(
     try {
       const renderResult = await renderSvgFile(inputPath, request.options);
       const parsed = path.parse(inputPath);
-      const outputFile = path.join(request.outputDir, `${parsed.name}.${renderResult.format}`);
+      const ext = renderResult.format === 'jpeg' ? 'jpg' : renderResult.format;
+      const outputFile = path.join(request.outputDir, `${parsed.name}.${ext}`);
       await fs.writeFile(outputFile, renderResult.buffer);
       successes += 1;
       sendProgress(conversion.window, {

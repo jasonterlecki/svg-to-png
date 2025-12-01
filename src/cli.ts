@@ -239,16 +239,17 @@ function createJobs(
 ): RenderJob[] {
   const jobs: RenderJob[] = [];
   const resolvedOutDir = targets.outDir ? path.resolve(targets.outDir) : undefined;
+  const extension = extensionForFormat(format);
   inputPaths.forEach((inputPath) => {
     let outputPath: string;
     if (targets.outFile) {
       outputPath = path.resolve(targets.outFile);
     } else if (resolvedOutDir) {
       const baseName = path.parse(inputPath).name;
-      outputPath = path.join(resolvedOutDir, `${baseName}.${format}`);
+      outputPath = path.join(resolvedOutDir, `${baseName}.${extension}`);
     } else {
       const parsed = path.parse(inputPath);
-      outputPath = path.join(parsed.dir, `${parsed.name}.${format}`);
+      outputPath = path.join(parsed.dir, `${parsed.name}.${extension}`);
     }
 
     jobs.push({
@@ -302,6 +303,10 @@ function logJobFailure(
 ): void {
   const reason = error instanceof Error ? error.message : String(error);
   logger.error(`[${processed}/${total}] ✖ ${path.basename(job.inputPath)} (${reason})`);
+}
+
+function extensionForFormat(format: OutputFormat): string {
+  return format === 'jpeg' ? 'jpg' : format;
 }
 
 function parseFormat(value: string): OutputFormat {
