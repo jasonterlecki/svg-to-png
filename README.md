@@ -1,8 +1,6 @@
 # svg-to-png
 
-A Playwright-powered toolkit for turning SVG assets into raster formats (PNG, JPEG, WebP) without sacrificing CSS fidelity or advanced SVG features. The project exposes both a Node.js library API and (soon) a CLI tailored for batch conversion workflows.
-
-> ℹ️ The CLI is still under construction. The library APIs described below are fully usable today, and the CLI will be wired up next.
+A Playwright-powered toolkit for turning SVG assets into raster formats (PNG, JPEG, WebP) without sacrificing CSS fidelity or advanced SVG features. The project exposes both a Node.js library API and a CLI tailored for batch conversion workflows.
 
 ## Features
 
@@ -89,9 +87,39 @@ await renderSvgFile('path/to/logo.svg', {
 | `SVG2RASTER_CHROMIUM_PATH` | Absolute path to an existing Chromium/Chrome binary. Falls back to Playwright’s bundled browser. |
 | `SVG2RASTER_FORCE_MINIMAL_CHROMIUM=1` | Forces the renderer to use the constrained flag set (`--single-process`, `--no-zygote`, etc.) if your environment requires it. By default the renderer tries a standard launch first before falling back automatically. |
 
-## CLI (work in progress)
+## CLI usage
 
-The CLI (`svg2raster`) will mirror the library options (formats, dimensions, concurrency, CSS injection, etc.). Its implementation is in progress; once complete the README will cover full invocation examples and option descriptions. For now, rely on the library API above.
+After running `npm run build`, you can execute the CLI via `node dist/cli.js` (the published package exposes `svg2raster` via the `bin` entry). Examples:
+
+```bash
+# Single file with an explicit output path
+node dist/cli.js assets/logo.svg --out dist/logo.png --scale 2
+
+# Batch conversion using a glob – outputs end up in dist/icons with inferred names
+node dist/cli.js "icons/**/*.svg" --out-dir dist/icons --format webp --concurrency 4
+
+# Prevent external stylesheet loads and inject custom CSS
+node dist/cli.js badge.svg --out dist/badge.jpeg --disable-external-styles --css styles/fonts.css
+```
+
+Available options:
+
+| Option | Description |
+| --- | --- |
+| `<inputs...>` | One or more SVG file paths or glob patterns. Quote glob patterns so your shell does not expand them. |
+| `-o, --out <file>` | Output file path (only when processing a single input). |
+| `--out-dir <dir>` | Destination directory for batch conversion. The original filenames are preserved, but the extension changes to match the output format. |
+| `-f, --format <png|jpeg|webp>` | Output format (default `png`). |
+| `-w, --width <px>` / `-h, --height <px>` | Override the rendered dimensions. If one dimension is omitted, the SVG aspect ratio determines the other. |
+| `-s, --scale <factor>` | Device pixel ratio (e.g., `2` for “@2x”). |
+| `-b, --background <color>` | Background color or `"transparent"` (default). |
+| `--css <file>` | Additional CSS file to inject before rendering (useful for custom fonts). |
+| `-t, --time <seconds>` | Timestamp for capturing animated SVGs. |
+| `--concurrency <count>` | Parallel render jobs (default is derived from CPU count). |
+| `--disable-external-styles` | Blocks external stylesheet requests referenced by the SVG. |
+| `--silent` / `--verbose` | Control CLI logging verbosity. |
+
+All CLI options ultimately map to the same rendering options described in the library section, so refer there for further detail. The CLI automatically shuts down the shared Playwright browser once all jobs finish.
 
 ## Development workflow
 
