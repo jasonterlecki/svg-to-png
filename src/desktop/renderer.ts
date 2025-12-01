@@ -1,5 +1,5 @@
 import type { Svg2RasterApi } from './preloadTypes.js';
-import type { UiRenderOptions } from './ipc.js';
+import type { UiRenderOptions, UiProgressEvent, UiCompleteEvent } from './ipc.js';
 
 declare global {
   interface Window {
@@ -7,12 +7,19 @@ declare global {
   }
 }
 
+interface JobState {
+  path: string;
+  status: 'pending' | 'queued' | 'started' | 'succeeded' | 'failed';
+  message?: string;
+}
+
 const api = window.svg2raster ?? null;
 const selectFilesBtn = document.getElementById('select-files') as HTMLButtonElement | null;
-const filesSummary = document.getElementById('selected-files') as HTMLDivElement | null;
+const jobTableBody = document.getElementById('job-table-body') as HTMLTableSectionElement | null;
 const selectOutputBtn = document.getElementById('select-output') as HTMLButtonElement | null;
 const outputSummary = document.getElementById('output-directory') as HTMLDivElement | null;
 const convertBtn = document.getElementById('convert') as HTMLButtonElement | null;
+const cancelBtn = document.getElementById('cancel') as HTMLButtonElement | null;
 const statusEl = document.getElementById('status') as HTMLDivElement | null;
 const formatSelect = document.getElementById('format') as HTMLSelectElement | null;
 const widthInput = document.getElementById('width') as HTMLInputElement | null;
@@ -25,6 +32,8 @@ const extraCssInput = document.getElementById('extra-css') as HTMLTextAreaElemen
 
 let selectedFiles: string[] = [];
 let outputDirectory: string | null = null;
+let jobStates: JobState[] = [];
+let isConverting = false;
 
 selectFilesBtn?.addEventListener('click', async () => {
   if (!api) {
@@ -33,8 +42,7 @@ selectFilesBtn?.addEventListener('click', async () => {
   }
   const files = await api.chooseInputFiles();
   if (files.length > 0) {
-    selectedFiles = files;
-    updateFilesSummary();
+    setSelectedFiles(files);
   }
 });
 
@@ -50,6 +58,13 @@ selectOutputBtn?.addEventListener('click', async () => {
   }
 });
 
+cancelBtn?.addEventListener('click', () => {
+  if (!api || !isConverting) {
+    return;
+  }
+  api.requestCancel();
+});
+
 convertBtn?.addEventListener('click', async () => {
   if (!selectedFiles.length || !outputDirectory) {
     showStatus('Select input files and an output directory first.', 'error');
@@ -61,43 +76,68 @@ convertBtn?.addEventListener('click', async () => {
     return;
   }
 
+  if (isConverting) {
+    return;
+  }
+
+  jobStates = jobStates.map((job) => ({ ...job, status: 'queued', message: undefined }));
+  renderJobList();
+
   convertBtn.disabled = true;
+  cancelBtn?.removeAttribute('disabled');
+  isConverting = true;
   showStatus('Rendering…', 'info');
 
   const options = buildRenderOptions();
   try {
-    const result = await api.convert({
+    await api.convert({
       inputPaths: selectedFiles,
       outputDir: outputDirectory,
       options,
     });
-
-    if (result.failures.length === 0) {
-      showStatus(`Converted ${result.successes} file(s).`, 'success');
-    } else {
-      const failureDetails = result.failures
-        .map((failure: { path: string; error: string }) => `${failure.path}: ${failure.error}`)
-        .join('\n');
-      showStatus(
-        `Converted ${result.successes} file(s). ${result.failures.length} failed:\n${failureDetails}`,
-        'error',
-      );
-    }
   } catch (error) {
     showStatus(
       `Failed to convert files: ${error instanceof Error ? error.message : String(error)}`,
       'error',
     );
   } finally {
+    isConverting = false;
     convertBtn.disabled = false;
+    cancelBtn?.setAttribute('disabled', 'true');
   }
 });
 
-function updateFilesSummary(): void {
-  if (filesSummary) {
-    const list = selectedFiles.map((file) => `<li>${file}</li>`).join('');
-    filesSummary.innerHTML = `<strong>${selectedFiles.length} file(s) selected</strong><ul>${list}</ul>`;
+if (api) {
+  api.onProgress(handleProgressEvent);
+  api.onComplete(handleCompleteEvent);
+}
+
+function setSelectedFiles(files: string[]): void {
+  const unique = Array.from(new Set(files));
+  selectedFiles = unique;
+  jobStates = unique.map((file) => ({
+    path: file,
+    status: 'pending',
+  }));
+  renderJobList();
+}
+
+function renderJobList(): void {
+  if (!jobTableBody) {
+    return;
   }
+  if (jobStates.length === 0) {
+    jobTableBody.innerHTML =
+      '<tr><td colspan="2" class="placeholder">No files selected.</td></tr>';
+    return;
+  }
+
+  jobTableBody.innerHTML = jobStates
+    .map(
+      (job) =>
+        `<tr><td>${job.path}</td><td>${formatStatus(job.status, job.message)}</td></tr>`,
+    )
+    .join('');
 }
 
 function updateOutputSummary(): void {
@@ -133,4 +173,45 @@ function showStatus(message: string, variant: 'info' | 'success' | 'error'): voi
   }
   statusEl.textContent = message;
   statusEl.dataset.variant = variant;
+}
+
+function formatStatus(status: JobState['status'], message?: string): string {
+  const labelMap: Record<JobState['status'], string> = {
+    pending: 'Pending',
+    queued: 'Queued',
+    started: 'Rendering…',
+    succeeded: 'Done',
+    failed: 'Failed',
+  };
+  const base = labelMap[status] ?? status;
+  return message ? `${base} (${message})` : base;
+}
+
+function handleProgressEvent(event: UiProgressEvent): void {
+  const target = jobStates.find((job) => job.path === event.path);
+  if (!target) {
+    return;
+  }
+  if (event.status === 'started') {
+    target.status = 'started';
+  } else if (event.status === 'succeeded') {
+    target.status = 'succeeded';
+  } else if (event.status === 'failed') {
+    target.status = 'failed';
+  }
+  target.message = event.message;
+  renderJobList();
+}
+
+function handleCompleteEvent(event: UiCompleteEvent): void {
+  if (convertBtn) {
+    convertBtn.disabled = false;
+  }
+  cancelBtn?.setAttribute('disabled', 'true');
+  const processed = event.successes + event.failures;
+  const baseMessage = event.cancelled
+    ? `Conversion cancelled after ${processed} file(s).`
+    : `Converted ${event.successes} file(s) with ${event.failures} failure(s).`;
+  const variant: 'success' | 'error' = event.cancelled || event.failures ? 'error' : 'success';
+  showStatus(baseMessage, variant);
 }

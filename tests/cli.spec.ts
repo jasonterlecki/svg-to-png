@@ -3,11 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runCli } from '../src/cli';
+import { runCli, executeCli, type CliFlags } from '../src/cli';
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(testDir, 'fixtures');
 const simpleSvgPath = path.join(fixturesDir, 'simple.svg');
+const silentLogger = { info: () => undefined, verbose: () => undefined, error: () => undefined };
 
 const { renderSvgFileMock, shutdownRendererMock } = vi.hoisted(() => {
   const renderMock = vi.fn(async (_input: string, options?: { format?: string }) => ({
@@ -27,6 +28,21 @@ vi.mock('../src/index', () => ({
 
 describe('CLI', () => {
   let tmpDir: string;
+  const baseFlags: CliFlags = {
+    out: undefined,
+    outDir: undefined,
+    format: 'png',
+    width: undefined,
+    height: undefined,
+    scale: undefined,
+    background: undefined,
+    css: undefined,
+    time: undefined,
+    concurrency: 1,
+    silent: true,
+    verbose: false,
+    disableExternalStyles: false,
+  };
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'svg2raster-cli-'));
@@ -80,5 +96,17 @@ describe('CLI', () => {
     await expect(
       runCli(['node', 'cli', first, second, '--out', path.join(tmpDir, 'out.png'), '--silent']),
     ).rejects.toThrow('--out can only be used with a single input');
+  });
+
+  it('honors cancellation signals during execution', async () => {
+    const outFile = path.join(tmpDir, 'cancel.png');
+    const controller = new AbortController();
+    const promise = executeCli(
+      [simpleSvgPath],
+      { ...baseFlags, out: outFile },
+      { signal: controller.signal, logger: silentLogger },
+    );
+    controller.abort();
+    await expect(promise).rejects.toThrow(/cancelled/i);
   });
 });

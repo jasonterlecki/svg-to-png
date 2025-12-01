@@ -21,3 +21,17 @@ export interface UiConvertResult {
   successes: number;
   failures: Array<{ path: string; error: string }>;
 }
+
+export type UiJobStatus = 'queued' | 'started' | 'succeeded' | 'failed';
+
+export interface UiProgressEvent {
+  path: string;
+  status: UiJobStatus;
+  message?: string;
+}
+
+export interface UiCompleteEvent {
+  successes: number;
+  failures: number;
+  cancelled: boolean;
+}

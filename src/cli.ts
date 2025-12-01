@@ -13,7 +13,7 @@ import { renderSvgFile, shutdownRenderer } from './index.js';
 
 const DEFAULT_CONCURRENCY = Math.max(1, Math.min(os.cpus()?.length ?? 4, 4));
 
-interface CliFlags {
+export interface CliFlags {
   out?: string;
   outDir?: string;
   format: OutputFormat;
@@ -40,12 +40,34 @@ interface Logger {
   error: (...args: unknown[]) => void;
 }
 
+export interface CliExecutionOptions {
+  signal?: AbortSignal;
+  logger?: Logger;
+}
+
 export async function runCli(argv: readonly string[]): Promise<void> {
   const program = buildProgram();
   const parsed = await program.parseAsync(argv);
   const inputs = parsed.args as string[];
   const options = parsed.opts<CliFlags>();
-  await execute(inputs, options);
+
+  const controller = new AbortController();
+  let sigintCount = 0;
+  const handleSigint = (): void => {
+    sigintCount += 1;
+    if (sigintCount === 1) {
+      controller.abort();
+    } else {
+      process.exit(130);
+    }
+  };
+  process.on('SIGINT', handleSigint);
+
+  try {
+    await executeCli(inputs, options, { signal: controller.signal });
+  } finally {
+    process.off('SIGINT', handleSigint);
+  }
 }
 
 function buildProgram(): Command {
@@ -84,12 +106,16 @@ function buildProgram(): Command {
   return program;
 }
 
-async function execute(inputs: string[], flags: CliFlags): Promise<void> {
+export async function executeCli(
+  inputs: string[],
+  flags: CliFlags,
+  context: CliExecutionOptions = {},
+): Promise<void> {
   if (inputs.length === 0) {
     throw new InvalidArgumentError('At least one input path is required.');
   }
 
-  const logger = createLogger(flags);
+  const logger = context.logger ?? createLogger(flags);
   const resolvedInputs = await resolveInputFiles(inputs);
   if (resolvedInputs.length === 0) {
     throw new InvalidArgumentError('No SVG files matched the provided inputs.');
@@ -124,11 +150,32 @@ async function execute(inputs: string[], flags: CliFlags): Promise<void> {
   const concurrency = Math.max(1, Math.min(flags.concurrency ?? DEFAULT_CONCURRENCY, 32));
   logger.verbose(`Rendering ${jobs.length} file(s) with concurrency ${concurrency}.`);
 
+  if (context.signal?.aborted) {
+    throw new Error('Conversion cancelled before start.');
+  }
+
+  const controller = context.signal;
+  let cancelled = false;
+  const abortHandler = (): void => {
+    if (!cancelled) {
+      cancelled = true;
+      logger.info('Cancellation requested. Waiting for in-flight renders to finish… (press Ctrl+C again to force exit)');
+    }
+  };
+  controller?.addEventListener('abort', abortHandler);
+
   const errors: Array<{ job: RenderJob; error: unknown }> = [];
   let nextIndex = 0;
+  let completed = 0;
+  let failed = 0;
+  const total = jobs.length;
+  const startTime = Date.now();
 
   async function worker(): Promise<void> {
     while (true) {
+      if (cancelled) {
+        return;
+      }
       const jobIndex = nextIndex++;
       if (jobIndex >= jobs.length) {
         return;
@@ -136,8 +183,12 @@ async function execute(inputs: string[], flags: CliFlags): Promise<void> {
 
       const job = jobs[jobIndex];
       try {
-        await processJob(job, renderOptions, logger);
+        const info = await processJob(job, renderOptions);
+        completed += 1;
+        logJobSuccess(logger, job, info, completed + failed, total);
       } catch (error) {
+        failed += 1;
+        logJobFailure(logger, job, error, completed + failed, total);
         errors.push({ job, error });
       }
     }
@@ -147,7 +198,12 @@ async function execute(inputs: string[], flags: CliFlags): Promise<void> {
     const workers = Array.from({ length: Math.min(concurrency, jobs.length) }, () => worker());
     await Promise.all(workers);
   } finally {
+    controller?.removeEventListener('abort', abortHandler);
     await shutdownRenderer().catch(() => undefined);
+  }
+
+  if (cancelled) {
+    throw new Error(`Conversion cancelled after ${completed + failed} of ${total} file(s).`);
   }
 
   if (errors.length > 0) {
@@ -161,7 +217,8 @@ async function execute(inputs: string[], flags: CliFlags): Promise<void> {
     throw new Error(`${errors.length} job(s) failed.`);
   }
 
-  logger.info(`Converted ${jobs.length} SVG file(s).`);
+  const duration = Date.now() - startTime;
+  logger.info(`Converted ${completed} SVG file(s) in ${duration}ms.`);
 }
 
 async function resolveInputFiles(patterns: string[]): Promise<string[]> {
@@ -203,19 +260,48 @@ function createJobs(
   return jobs;
 }
 
-async function processJob(
-  job: RenderJob,
-  options: RenderOptions,
-  logger: Logger,
-): Promise<void> {
+interface JobInfo {
+  format: OutputFormat;
+  width: number;
+  height: number;
+  durationMs: number;
+}
+
+async function processJob(job: RenderJob, options: RenderOptions): Promise<JobInfo> {
   const start = Date.now();
   const result = await renderSvgFile(job.inputPath, options);
   await fs.mkdir(path.dirname(job.outputPath), { recursive: true });
   await fs.writeFile(job.outputPath, result.buffer);
   const duration = Date.now() - start;
+  return {
+    format: result.format,
+    width: result.width,
+    height: result.height,
+    durationMs: duration,
+  };
+}
+
+function logJobSuccess(
+  logger: Logger,
+  job: RenderJob,
+  info: JobInfo,
+  processed: number,
+  total: number,
+): void {
   logger.info(
-    `✔ ${path.basename(job.inputPath)} → ${job.outputPath} (${result.format.toUpperCase()} ${result.width}x${result.height}, ${duration}ms)`,
+    `[${processed}/${total}] ✔ ${path.basename(job.inputPath)} → ${job.outputPath} (${info.format.toUpperCase()} ${info.width}x${info.height}, ${info.durationMs}ms)`,
   );
+}
+
+function logJobFailure(
+  logger: Logger,
+  job: RenderJob,
+  error: unknown,
+  processed: number,
+  total: number,
+): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  logger.error(`[${processed}/${total}] ✖ ${path.basename(job.inputPath)} (${reason})`);
 }
 
 function parseFormat(value: string): OutputFormat {

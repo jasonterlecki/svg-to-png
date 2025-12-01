@@ -102,6 +102,8 @@ node dist/cli.js "icons/**/*.svg" --out-dir dist/icons --format webp --concurren
 node dist/cli.js badge.svg --out dist/badge.jpeg --disable-external-styles --css styles/fonts.css
 ```
 
+Conversions now show per-file progress (`[1/5] ✔ icon.svg → dist/icon.png`) and can be cancelled cleanly with `Ctrl+C` (press twice to force immediate exit). The CLI reports a summary at the end, including any failed files.
+
 Available options:
 
 | Option | Description |
@@ -129,7 +131,7 @@ Prefer a visual interface? Launch the Electron desktop experience after building
 npm run desktop
 ```
 
-The app lets you pick SVG files (or drag them in), choose an output directory, tweak format/dimension/scale/background/time options, and run conversions while viewing status updates. It shares the same rendering engine under the hood, so Playwright’s Chromium binary must still be installed (`npx playwright install --with-deps chromium`).
+The app lets you pick SVG files, view a per-file status table, choose an output directory, tweak format/dimension/scale/background/time options, and run conversions while viewing live progress. You can cancel an active batch via the new “Cancel” button. It shares the same rendering engine under the hood, so Playwright’s Chromium binary must still be installed (`npx playwright install --with-deps chromium`).
 
 ### Electron structure
 

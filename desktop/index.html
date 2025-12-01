@@ -60,12 +60,20 @@
         opacity: 0.5;
         cursor: not-allowed;
       }
-      #selected-files ul {
-        margin: 0.5rem 0 0;
-        padding-left: 1.25rem;
-        font-size: 0.9rem;
-        max-height: 120px;
-        overflow: auto;
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 0.5rem;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 0.4rem;
+        border-bottom: 1px solid #e0e0e0;
+      }
+      .placeholder {
+        text-align: center;
+        color: #666;
       }
       #status[data-variant='success'] {
         color: #0a7d16;
@@ -81,7 +89,19 @@
       <section>
         <h2>Inputs</h2>
         <button id="select-files" type="button">Select SVG files…</button>
-        <div id="selected-files">No files selected.</div>
+        <div id="selected-files">
+          <table>
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="job-table-body">
+              <tr><td colspan="2" class="placeholder">No files selected.</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
       <section>
         <h2>Output</h2>
@@ -129,6 +149,7 @@
       </section>
       <section>
         <button id="convert" type="button">Convert</button>
+        <button id="cancel" type="button" disabled>Cancel</button>
         <div id="status" data-variant="info"></div>
       </section>
     </main>
