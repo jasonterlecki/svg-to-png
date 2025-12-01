@@ -2,6 +2,7 @@
 
 import { Command, InvalidArgumentError } from 'commander';
 import fg from 'fast-glob';
+import { Buffer } from 'node:buffer';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,14 +10,15 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { SUPPORTED_FORMATS } from './config.js';
 import type { OutputFormat, RenderOptions } from './types.js';
-import { renderSvgFile, shutdownRenderer } from './index.js';
+import { renderSvg, renderSvgFile, renderSvgUrl, shutdownRenderer } from './index.js';
+import { getPresetSearchPaths, loadPresetByName, loadPresetCollection } from './presets.js';
 
 const DEFAULT_CONCURRENCY = Math.max(1, Math.min(os.cpus()?.length ?? 4, 4));
 
 export interface CliFlags {
   out?: string;
   outDir?: string;
-  format: OutputFormat;
+  format?: OutputFormat;
   width?: number;
   height?: number;
   scale?: number;
@@ -27,12 +29,55 @@ export interface CliFlags {
   silent?: boolean;
   verbose?: boolean;
   disableExternalStyles?: boolean;
+  preset?: string;
+  presetFile?: string;
+  listPresets?: boolean;
+  stdin?: boolean;
+  inputRaw?: string[];
+  url?: string[];
 }
 
-interface RenderJob {
-  inputPath: string;
-  outputPath: string;
-}
+type RenderJob =
+  | {
+      type: 'file';
+      inputPath: string;
+      outputPath: string;
+      label: string;
+    }
+  | {
+      type: 'url';
+      url: string;
+      outputPath: string;
+      label: string;
+    }
+  | {
+      type: 'inline';
+      svg: string;
+      baseUrl?: string;
+      outputPath: string;
+      label: string;
+    };
+
+type ResolvedInput =
+  | {
+      type: 'file';
+      path: string;
+      baseName: string;
+      label: string;
+    }
+  | {
+      type: 'url';
+      url: string;
+      baseName: string;
+      label: string;
+    }
+  | {
+      type: 'inline';
+      svg: string;
+      baseName: string;
+      label: string;
+      baseUrl?: string;
+    };
 
 interface Logger {
   info: (...args: unknown[]) => void;
@@ -48,8 +93,14 @@ export interface CliExecutionOptions {
 export async function runCli(argv: readonly string[]): Promise<void> {
   const program = buildProgram();
   const parsed = await program.parseAsync(argv);
-  const inputs = parsed.args as string[];
+  const inputs = (parsed.args as string[]) ?? [];
   const options = parsed.opts<CliFlags>();
+  options.presetFile = options.presetFile ? path.resolve(options.presetFile) : undefined;
+
+  if (options.listPresets) {
+    await listAvailablePresets(options);
+    return;
+  }
 
   const controller = new AbortController();
   let sigintCount = 0;
@@ -75,10 +126,10 @@ function buildProgram(): Command {
   program
     .name('svg2raster')
     .description('Convert SVG assets to PNG/JPEG/WebP using a headless Chromium renderer.')
-    .argument('<inputs...>', 'Input SVG paths or glob patterns (quotes recommended for globs).')
+    .argument('[inputs...]', 'Input SVG paths or glob patterns (quotes recommended for globs).')
     .option('-o, --out <file>', 'Output file path (single input only).')
     .option('--out-dir <dir>', 'Output directory for batch conversion.')
-    .option('-f, --format <format>', 'Output format (png, jpeg, webp).', parseFormat, 'png')
+    .option('-f, --format <format>', 'Output format (png, jpeg, webp).', parseFormat)
     .option('-w, --width <pixels>', 'Target width in pixels.', (value) =>
       parsePositiveInteger(value, 'width'),
     )
@@ -100,6 +151,12 @@ function buildProgram(): Command {
       DEFAULT_CONCURRENCY,
     )
     .option('--disable-external-styles', 'Prevent loading external stylesheets referenced by the SVG.')
+    .option('--stdin', 'Read SVG markup from STDIN (can be combined with other inputs).')
+    .option('--input-raw <svg...>', 'Raw SVG markup to render (repeatable).', collectValues, [])
+    .option('--url <address>', 'Remote SVG URL to render (repeatable).', collectValues, [])
+    .option('--preset <name>', 'Load render options from a named preset.')
+    .option('--preset-file <file>', 'Path to a presets JSON file (defaults to svg2raster.presets.json or ~/.config/svg2raster/).')
+    .option('--list-presets', 'List available presets and exit.')
     .option('--silent', 'Suppress non-error log output.')
     .option('--verbose', 'Enable verbose log output.');
 
@@ -111,14 +168,81 @@ export async function executeCli(
   flags: CliFlags,
   context: CliExecutionOptions = {},
 ): Promise<void> {
-  if (inputs.length === 0) {
-    throw new InvalidArgumentError('At least one input path is required.');
+  const logger = context.logger ?? createLogger(flags);
+  const { filePatterns, urlInputs } = partitionInputArguments(inputs);
+  const resolvedFilePaths = await resolveInputFiles(filePatterns);
+  const extraUrls = flags.url ?? [];
+  const remoteUrlInputs = [...urlInputs, ...extraUrls];
+  const inlineMarkupSources: Array<{ svg: string; label: string }> = [];
+  const rawInputs = flags.inputRaw ?? [];
+  rawInputs.forEach((value, index) => {
+    if (!value?.trim()) {
+      throw new InvalidArgumentError('--input-raw value cannot be empty.');
+    }
+    inlineMarkupSources.push({ svg: value, label: `raw-${index + 1}` });
+  });
+
+  if (flags.stdin) {
+    const stdinSvg = await readStdin();
+    inlineMarkupSources.push({ svg: stdinSvg, label: 'stdin' });
   }
 
-  const logger = context.logger ?? createLogger(flags);
-  const resolvedInputs = await resolveInputFiles(inputs);
+  const resolvedInputs: ResolvedInput[] = [];
+  let fileIndex = 0;
+  for (const filePath of resolvedFilePaths) {
+    const parsed = path.parse(filePath);
+    const fallbackName = `file-${++fileIndex}`;
+    const baseName = sanitizeFileStem(parsed.name, fallbackName);
+    resolvedInputs.push({
+      type: 'file',
+      path: path.resolve(filePath),
+      baseName,
+      label: filePath,
+    });
+  }
+
+  let remoteIndex = 0;
+  for (const urlInput of remoteUrlInputs) {
+    const trimmed = urlInput?.trim();
+    if (!trimmed) {
+      throw new InvalidArgumentError('URL inputs cannot be empty.');
+    }
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(trimmed);
+    } catch {
+      throw new InvalidArgumentError(`Invalid URL: ${trimmed}`);
+    }
+    const fallbackName = `remote-${++remoteIndex}`;
+    const baseName = sanitizeFileStem(deriveBaseNameFromUrl(parsedUrl, fallbackName), fallbackName);
+    resolvedInputs.push({
+      type: 'url',
+      url: parsedUrl.toString(),
+      baseName,
+      label: parsedUrl.toString(),
+    });
+  }
+
+  let inlineIndex = 0;
+  for (const inlineSource of inlineMarkupSources) {
+    inlineIndex += 1;
+    const fallbackName = inlineSource.label || `inline-${inlineIndex}`;
+    const baseName = sanitizeFileStem(fallbackName, `inline-${inlineIndex}`);
+    resolvedInputs.push({
+      type: 'inline',
+      svg: inlineSource.svg,
+      baseName,
+      label: inlineSource.label || fallbackName,
+    });
+  }
+
   if (resolvedInputs.length === 0) {
-    throw new InvalidArgumentError('No SVG files matched the provided inputs.');
+    if (filePatterns.length > 0) {
+      throw new InvalidArgumentError('No SVG files matched the provided inputs.');
+    }
+    throw new InvalidArgumentError(
+      'Provide at least one SVG source (file path, URL, --input-raw, or --stdin).',
+    );
   }
 
   if (flags.out && resolvedInputs.length !== 1) {
@@ -130,8 +254,21 @@ export async function executeCli(
     throw new InvalidArgumentError('For multiple inputs, specify --out-dir to choose an output folder.');
   }
 
+  const presetResult = flags.preset
+    ? await loadPresetByName(flags.preset, flags.presetFile)
+    : null;
+  if (flags.preset && !presetResult) {
+    const searchDescription = getPresetSearchPaths(flags.presetFile)
+      .map((candidate) => candidate)
+      .join(', ');
+    throw new InvalidArgumentError(
+      `Preset "${flags.preset}" was not found. Checked: ${searchDescription}`,
+    );
+  }
+  const presetOptions = presetResult?.preset.options ?? {};
+
   const extraCss = flags.css ? await fs.readFile(path.resolve(flags.css), 'utf8') : undefined;
-  const renderOptions: RenderOptions = {
+  const renderOptions: RenderOptions = mergeRenderOptions(presetOptions, {
     format: flags.format,
     width: flags.width,
     height: flags.height,
@@ -140,9 +277,14 @@ export async function executeCli(
     extraCss,
     time: flags.time,
     allowExternalStyles: flags.disableExternalStyles ? false : undefined,
-  };
+  });
 
-  const jobs = createJobs(resolvedInputs, flags.format, {
+  if (!renderOptions.format) {
+    renderOptions.format = presetOptions.format ?? 'png';
+  }
+  const outputFormat = renderOptions.format ?? 'png';
+
+  const jobs = createJobs(resolvedInputs, outputFormat, {
     outFile: flags.out,
     outDir,
   });
@@ -209,7 +351,7 @@ export async function executeCli(
   if (errors.length > 0) {
     for (const failure of errors) {
       logger.error(
-        `Failed to convert ${failure.job.inputPath}: ${
+        `Failed to convert ${failure.job.label}: ${
           failure.error instanceof Error ? failure.error.message : failure.error
         }`,
       );
@@ -233,29 +375,52 @@ async function resolveInputFiles(patterns: string[]): Promise<string[]> {
 }
 
 function createJobs(
-  inputPaths: string[],
+  inputs: ResolvedInput[],
   format: OutputFormat,
   targets: { outFile?: string; outDir?: string },
 ): RenderJob[] {
   const jobs: RenderJob[] = [];
   const resolvedOutDir = targets.outDir ? path.resolve(targets.outDir) : undefined;
   const extension = extensionForFormat(format);
-  inputPaths.forEach((inputPath) => {
+
+  inputs.forEach((input, index) => {
     let outputPath: string;
+    const fallbackName = `output-${index + 1}`;
+    const stem = input.baseName || fallbackName;
+
     if (targets.outFile) {
       outputPath = path.resolve(targets.outFile);
     } else if (resolvedOutDir) {
-      const baseName = path.parse(inputPath).name;
-      outputPath = path.join(resolvedOutDir, `${baseName}.${extension}`);
+      outputPath = path.join(resolvedOutDir, `${stem}.${extension}`);
     } else {
-      const parsed = path.parse(inputPath);
-      outputPath = path.join(parsed.dir, `${parsed.name}.${extension}`);
+      const defaultDir =
+        input.type === 'file' ? path.dirname(input.path) : process.cwd();
+      outputPath = path.join(defaultDir, `${stem}.${extension}`);
     }
 
-    jobs.push({
-      inputPath: path.resolve(inputPath),
-      outputPath,
-    });
+    if (input.type === 'file') {
+      jobs.push({
+        type: 'file',
+        inputPath: path.resolve(input.path),
+        outputPath,
+        label: input.label,
+      });
+    } else if (input.type === 'url') {
+      jobs.push({
+        type: 'url',
+        url: input.url,
+        outputPath,
+        label: input.label,
+      });
+    } else {
+      jobs.push({
+        type: 'inline',
+        svg: input.svg,
+        baseUrl: input.baseUrl,
+        outputPath,
+        label: input.label,
+      });
+    }
   });
 
   return jobs;
@@ -270,7 +435,20 @@ interface JobInfo {
 
 async function processJob(job: RenderJob, options: RenderOptions): Promise<JobInfo> {
   const start = Date.now();
-  const result = await renderSvgFile(job.inputPath, options);
+  let result;
+  if (job.type === 'file') {
+    result = await renderSvgFile(job.inputPath, options);
+  } else if (job.type === 'url') {
+    result = await renderSvgUrl(job.url, options);
+  } else {
+    result = await renderSvg(
+      {
+        svg: job.svg,
+        baseUrl: job.baseUrl,
+      },
+      options,
+    );
+  }
   await fs.mkdir(path.dirname(job.outputPath), { recursive: true });
   await fs.writeFile(job.outputPath, result.buffer);
   const duration = Date.now() - start;
@@ -290,7 +468,7 @@ function logJobSuccess(
   total: number,
 ): void {
   logger.info(
-    `[${processed}/${total}] ✔ ${path.basename(job.inputPath)} → ${job.outputPath} (${info.format.toUpperCase()} ${info.width}x${info.height}, ${info.durationMs}ms)`,
+    `[${processed}/${total}] ✔ ${job.label} → ${job.outputPath} (${info.format.toUpperCase()} ${info.width}x${info.height}, ${info.durationMs}ms)`,
   );
 }
 
@@ -302,7 +480,7 @@ function logJobFailure(
   total: number,
 ): void {
   const reason = error instanceof Error ? error.message : String(error);
-  logger.error(`[${processed}/${total}] ✖ ${path.basename(job.inputPath)} (${reason})`);
+  logger.error(`[${processed}/${total}] ✖ ${job.label} (${reason})`);
 }
 
 function extensionForFormat(format: OutputFormat): string {
@@ -341,6 +519,69 @@ function parseNonNegativeFloat(value: string, label: string): number {
   return parsed;
 }
 
+function collectValues(value: string, previous?: string[]): string[] {
+  const list = previous ?? [];
+  list.push(value);
+  return list;
+}
+
+function partitionInputArguments(entries: string[]): {
+  filePatterns: string[];
+  urlInputs: string[];
+} {
+  const filePatterns: string[] = [];
+  const urlInputs: string[] = [];
+  for (const entry of entries) {
+    if (isHttpUrl(entry)) {
+      urlInputs.push(entry);
+    } else {
+      filePatterns.push(entry);
+    }
+  }
+  return { filePatterns, urlInputs };
+}
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function deriveBaseNameFromUrl(url: URL, fallback: string): string {
+  const pathname = url.pathname.replace(/\/+$/, '');
+  const lastSegment = pathname.split('/').filter(Boolean).pop();
+  if (!lastSegment) {
+    return fallback;
+  }
+  const withoutQuery = lastSegment.split('?')[0].split('#')[0];
+  const dotIndex = withoutQuery.lastIndexOf('.');
+  if (dotIndex > 0) {
+    return withoutQuery.slice(0, dotIndex) || fallback;
+  }
+  return withoutQuery || fallback;
+}
+
+function sanitizeFileStem(stem: string, fallback: string): string {
+  const cleaned = stem
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return cleaned || fallback;
+}
+
+async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) {
+    throw new InvalidArgumentError('No STDIN data detected. Pipe an SVG into --stdin.');
+  }
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+  }
+  const content = Buffer.concat(chunks).toString('utf8');
+  if (!content.trim()) {
+    throw new InvalidArgumentError('STDIN was empty.');
+  }
+  return content;
+}
+
 function createLogger(flags: CliFlags): Logger {
   return {
     info: (...args: unknown[]) => {
@@ -357,6 +598,47 @@ function createLogger(flags: CliFlags): Logger {
       console.error(...args);
     },
   };
+}
+
+async function listAvailablePresets(flags: CliFlags): Promise<void> {
+  const collection = await loadPresetCollection(flags.presetFile);
+  if (!collection || collection.presets.length === 0) {
+    console.log(
+      'No presets found. Create svg2raster.presets.json in your project or ~/.config/svg2raster/.',
+    );
+    return;
+  }
+
+  console.log(`Presets (${collection.path}):`);
+  for (const preset of collection.presets) {
+    if (preset.description) {
+      console.log(` - ${preset.name}: ${preset.description}`);
+    } else {
+      console.log(` - ${preset.name}`);
+    }
+  }
+}
+
+function mergeRenderOptions(
+  preset: RenderOptions,
+  overrides: RenderOptions,
+): RenderOptions {
+  const merged: RenderOptions = { ...preset };
+  if (overrides.format) merged.format = overrides.format;
+  if (overrides.width !== undefined) merged.width = overrides.width;
+  if (overrides.height !== undefined) merged.height = overrides.height;
+  if (overrides.scale !== undefined) merged.scale = overrides.scale;
+  if (overrides.background !== undefined) merged.background = overrides.background;
+  if (overrides.extraCss !== undefined) merged.extraCss = overrides.extraCss;
+  if (overrides.time !== undefined) merged.time = overrides.time;
+  if (overrides.allowExternalStyles !== undefined) {
+    merged.allowExternalStyles = overrides.allowExternalStyles;
+  }
+  if (overrides.baseUrl !== undefined) merged.baseUrl = overrides.baseUrl;
+  if (overrides.navigationTimeoutMs !== undefined) {
+    merged.navigationTimeoutMs = overrides.navigationTimeoutMs;
+  }
+  return merged;
 }
 
 const isMainModule =

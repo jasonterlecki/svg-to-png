@@ -11,6 +11,7 @@ SVG → raster toolkit with a typed Node.js API, a feature-complete CLI, and an 
   - [CLI](#cli-quick-start)
   - [Desktop App](#desktop-app-quick-start)
   - [Library API](#library-quick-start)
+- [Presets](#presets)
 - [CLI Usage](#cli-usage)
 - [Desktop App](#desktop-app)
 - [Library API](#library-api)
@@ -22,9 +23,11 @@ SVG → raster toolkit with a typed Node.js API, a feature-complete CLI, and an 
 
 - **Library**: `renderSvg`, `renderSvgFile`, and `shutdownRenderer` with animation timestamps, CSS injection, base URLs, Sharp-powered JPEG/WebP conversion, and automatic Chromium installation.
 - **CLI (`svg2raster`)**: Globs, output directories/files, format/dimension overrides, scale, background, CSS injection, animation timestamp, concurrency limits, per-file progress, and graceful cancellation (Ctrl+C).
-- **Desktop App**: Electron UI that mirrors CLI options, shows per-file status, and enables cancelling active batches.
+- **Desktop App**: Electron UI that mirrors CLI options, shows per-file status, enables cancelling active batches, and now accepts URLs or pasted SVG markup.
 - **Reliability**: If Chromium is missing, the renderer automatically downloads it into `node_modules/playwright-core/.local-browsers`.
 - **Tested**: Vitest suite covers utilities, CLI logic, and renderer behavior (with auto-install fallback).
+- **Presets**: Shared `svg2raster.presets.json` files store favorite conversion settings that can be loaded by both the CLI and the desktop UI.
+- **Flexible inputs**: Local files, HTTP(S) URLs, piped STDIN, and inline SVG strings (CLI and desktop) all share the same rendering pipeline.
 
 ## Requirements
 
@@ -57,6 +60,12 @@ node dist/cli.js assets/logo.svg --out dist/logo.png
 
 # Convert a directory to WebP at 2× scale
 node dist/cli.js "icons/**/*.svg" --out-dir dist/icons --format webp --scale 2
+
+# Render from a remote URL
+node dist/cli.js https://example.com/logo.svg --out dist/logo.png
+
+# Pipe inline SVG from another command
+curl -s https://example.com/icon.svg | node dist/cli.js --stdin --out icon.png
 ```
 
 While running, the CLI prints per-file progress (e.g., `[3/12] ✔ icon.svg → dist/icon.png`). Press `Ctrl+C` once to cancel gracefully (remaining jobs are skipped). Press again to force exit.
@@ -69,9 +78,9 @@ npm run desktop
 
 Steps:
 
-1. Click **Select SVG files…** (multiple selection supported).
+1. Click **Select SVG files…**, paste a remote URL, or drop inline SVG markup (all inputs share the same status table).
 2. Choose an output directory.
-3. Adjust options (format, width/height, scale, background, animation time, CSS injection, disable external styles).
+3. Adjust options (format, width/height, scale, background, animation time, CSS injection, disable external styles) or load a preset.
 4. Click **Convert**. Progress updates in the table. Use **Cancel** to stop current batches.
 
 ### Library Quick Start
@@ -91,6 +100,39 @@ const result = await renderSvgFile('assets/badge.svg', {
 await writeFile('badge.jpg', result.buffer);
 await shutdownRenderer(); // optional, useful in long-lived processes
 ```
+
+## Presets
+
+Save your favorite combinations of format, size, CSS, and animation settings into `svg2raster.presets.json` (project root) or `~/.config/svg2raster/svg2raster.presets.json` (`%APPDATA%/svg2raster/svg2raster.presets.json` on Windows). The CLI and desktop UI read the first file they find (custom path, then project file, then user config). Example:
+
+```json
+{
+  "presets": [
+    {
+      "name": "social-avatar",
+      "description": "JPEG avatar @2x with white background",
+      "options": {
+        "format": "jpeg",
+        "width": 512,
+        "height": 512,
+        "scale": 2,
+        "background": "#fff"
+      }
+    },
+    {
+      "name": "web-preview",
+      "description": "Transparent PNG for docs",
+      "options": {
+        "format": "png",
+        "width": 640
+      }
+    }
+  ]
+}
+```
+
+- CLI: `svg2raster icon.svg --preset social-avatar --out avatar.jpg`. Use `--list-presets` to see what's available, and `--preset-file ./team-presets.json` to override the lookup path.
+- Desktop: Use the **Preset** dropdown to load settings, **Save…** to capture the current form fields as a preset, and **Delete** to remove the selected preset.
 
 ## CLI Usage
 
@@ -116,6 +158,12 @@ Options:
   -t, --time <seconds>   Animation timestamp (seconds)
   --concurrency <n>      Parallel render jobs (default: CPU limited)
   --disable-external-styles   Block external stylesheets
+  --stdin                Read SVG markup from STDIN
+  --input-raw <svg...>   Inline SVG markup (repeatable)
+  --url <address>        Remote SVG URL (repeatable, also accepted as a positional input)
+  --preset <name>        Load options from svg2raster.presets.json
+  --preset-file <file>   Use a custom presets file (default: project directory or user config)
+  --list-presets         List available presets and exit
   --silent               Suppress info logs
   --verbose              Extra logging
   --help                 Show help
@@ -126,6 +174,9 @@ Options:
 - Globs are powered by `fast-glob`; wrap them in quotes to avoid shell expansion.
 - JPEG outputs use `.jpg` extensions automatically.
 - Progress lines look like `[4/10] ✔ icon.svg → dist/icon.jpg (JPEG 128x128, 115ms)`.
+- HTTP(S) URLs are detected automatically; combine them with file globs or `--url` for explicit entries.
+- `--stdin` reads a single SVG payload from STDIN, so you can pipe from `curl`, `cat`, or other generators.
+- `--input-raw '<svg ...>'` is convenient for quick experiments or scripts that produce inline markup.
 - First Ctrl+C requests cancellation, second Ctrl+C exits immediately with code 130.
 - Exit codes: `0` success, `1` failure (at least one file failed), `130` forced cancellation.
 
@@ -134,8 +185,9 @@ Options:
 `npm run desktop` builds the TypeScript files and launches Electron. Features:
 
 - **Inputs panel**: select multiple SVGs; the table lists each file with live status.
+- **Remote/raw inputs**: download URLs or paste inline SVG markup directly into the queue.
 - **Output**: choose the destination directory.
-- **Options**: same as CLI (format, width, height, scale, background, animation time, CSS injection, disable external styles).
+- **Options**: same as CLI (format, width, height, scale, background, animation time, CSS injection, disable external styles) plus a shared **Preset** dropdown with Save/Delete actions.
 - **Controls**: Convert (start batch), Cancel (stop active renders), status message area.
 
 The app is hardened for sandboxed environments (GPU disabled, minimal logging). Chromium is downloaded into `node_modules/playwright-core/.local-browsers` if missing.

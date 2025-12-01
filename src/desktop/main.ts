@@ -8,8 +8,20 @@ import type {
   UiConvertResult,
   UiProgressEvent,
   UiCompleteEvent,
+  UiPresetListResult,
+  UiPresetSavePayload,
+  UiInputSource,
+  UiFetchedUrlResult,
 } from './ipc.js';
-import { renderSvgFile, shutdownRenderer } from '../index.js';
+import { renderSvg, renderSvgFile, shutdownRenderer } from '../index.js';
+import type { PresetEntry } from '../presets.js';
+import {
+  deletePresetEntry,
+  ensurePresetFilePath,
+  loadPresetCollection,
+  savePresetEntry,
+} from '../presets.js';
+import { fetchRemoteSvg } from '../utils/network.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -25,6 +37,7 @@ interface ConversionContext {
   window: BrowserWindow | null;
 }
 let activeConversion: ConversionContext | null = null;
+let presetFilePath: string | null = null;
 
 function createWindow(): void {
   const preloadPath = path.join(__dirname, 'preload.cjs');
@@ -136,10 +149,99 @@ ipcMain.handle('svg2raster:cancel', async () => {
   }
 });
 
-function normalizeRequest(request: UiConvertRequest): UiConvertRequest {
-  const uniqueInputs = Array.from(new Set((request.inputPaths ?? []).map((input) => path.resolve(input))));
+ipcMain.handle('svg2raster:presets:list', async (): Promise<UiPresetListResult> => {
+  const collection = await loadPresetCollection();
+  if (collection) {
+    presetFilePath = collection.path;
+    return {
+      path: collection.path,
+      presets: toUiPresets(collection.presets),
+    };
+  }
+  presetFilePath = null;
   return {
-    inputPaths: uniqueInputs,
+    path: null,
+    presets: [],
+  };
+});
+
+ipcMain.handle('svg2raster:presets:save', async (_event, payload: UiPresetSavePayload) => {
+  const targetPath = await ensurePresetFilePath(presetFilePath ?? undefined);
+  const updated = await savePresetEntry(
+    {
+      name: payload.name,
+      description: payload.description,
+      options: payload.options,
+    },
+    { targetPath },
+  );
+  presetFilePath = updated.path;
+  return {
+    path: updated.path,
+    presets: toUiPresets(updated.presets),
+  };
+});
+
+ipcMain.handle('svg2raster:presets:delete', async (_event, name: string) => {
+  if (!presetFilePath) {
+    return {
+      path: null,
+      presets: [],
+    };
+  }
+  const updated = await deletePresetEntry(name, { targetPath: presetFilePath });
+  presetFilePath = updated.path;
+  return {
+    path: updated.path,
+    presets: toUiPresets(updated.presets),
+  };
+});
+
+ipcMain.handle('svg2raster:inputs:fetch-url', async (_event, url: string): Promise<UiFetchedUrlResult> => {
+  const trimmed = url?.trim();
+  if (!trimmed) {
+    throw new Error('URL is required.');
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(`Invalid URL: ${trimmed}`);
+  }
+  const remote = await fetchRemoteSvg(parsed.toString());
+  const fallbackName = deriveNameFromUrl(parsed, 'remote');
+  return {
+    svg: remote.svg,
+    baseUrl: remote.baseUrl,
+    label: parsed.toString(),
+    nameHint: sanitizeNameHint(fallbackName, 'remote'),
+  };
+});
+
+function normalizeRequest(request: UiConvertRequest): UiConvertRequest {
+  const normalizedInputs: UiInputSource[] = [];
+  const seenFilePaths = new Set<string>();
+  for (const input of request.inputs ?? []) {
+    if (input.type === 'file') {
+      const absolutePath = path.resolve(input.path);
+      if (seenFilePaths.has(absolutePath)) {
+        continue;
+      }
+      seenFilePaths.add(absolutePath);
+      normalizedInputs.push({
+        ...input,
+        path: absolutePath,
+        nameHint: sanitizeNameHint(input.nameHint, path.parse(absolutePath).name || 'output'),
+      });
+    } else if (input.type === 'inline' && input.svg.trim()) {
+      normalizedInputs.push({
+        ...input,
+        nameHint: sanitizeNameHint(input.nameHint, 'inline'),
+      });
+    }
+  }
+  return {
+    inputs: normalizedInputs,
     outputDir: path.resolve(request.outputDir),
     options: request.options,
   };
@@ -149,7 +251,7 @@ async function convertFiles(
   request: UiConvertRequest,
   conversion: ConversionContext,
 ): Promise<UiConvertResult> {
-  if (!request.inputPaths.length) {
+  if (!request.inputs.length) {
     throw new Error('Select at least one SVG input.');
   }
   if (!request.outputDir) {
@@ -158,38 +260,47 @@ async function convertFiles(
 
   await fs.mkdir(request.outputDir, { recursive: true });
 
-  const failures: Array<{ path: string; error: string }> = [];
+  const failures: Array<{ id: string; label: string; error: string }> = [];
   let successes = 0;
+  const nameCounts = new Map<string, number>();
 
-  for (const inputPath of request.inputPaths) {
+  for (const input of request.inputs) {
     if (conversion.cancelled) {
       break;
     }
     sendProgress(conversion.window, {
-      path: inputPath,
+      id: input.id,
+      label: input.label,
       status: 'started',
     });
 
     try {
-      const renderResult = await renderSvgFile(inputPath, request.options);
-      const parsed = path.parse(inputPath);
+      const renderResult =
+        input.type === 'file'
+          ? await renderSvgFile(input.path, request.options)
+          : await renderSvg({ svg: input.svg, baseUrl: input.baseUrl }, request.options);
+
       const ext = renderResult.format === 'jpeg' ? 'jpg' : renderResult.format;
-      const outputFile = path.join(request.outputDir, `${parsed.name}.${ext}`);
+      const stem = reserveOutputName(nameCounts, input.nameHint);
+      const outputFile = path.join(request.outputDir, `${stem}.${ext}`);
       await fs.writeFile(outputFile, renderResult.buffer);
       successes += 1;
       sendProgress(conversion.window, {
-        path: inputPath,
+        id: input.id,
+        label: input.label,
         status: 'succeeded',
         message: `${renderResult.format.toUpperCase()} ${renderResult.width}x${renderResult.height}`,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       failures.push({
-        path: inputPath,
+        id: input.id,
+        label: input.label,
         error: message,
       });
       sendProgress(conversion.window, {
-        path: inputPath,
+        id: input.id,
+        label: input.label,
         status: 'failed',
         message,
       });
@@ -222,4 +333,48 @@ function sendProgress(window: BrowserWindow | null, payload: UiProgressEvent): v
 
 function sendCompletion(window: BrowserWindow | null, payload: UiCompleteEvent): void {
   window?.webContents.send('svg2raster:complete', payload);
+}
+
+function toUiPresets(entries: PresetEntry[]) {
+  return entries.map((entry) => ({
+    name: entry.name,
+    description: entry.description,
+    options: entry.options,
+  }));
+}
+
+function sanitizeNameHint(value: string | undefined, fallback: string): string {
+  if (!value) {
+    return fallback;
+  }
+  const cleaned = value
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return cleaned || fallback;
+}
+
+function deriveNameFromUrl(url: URL, fallback: string): string {
+  const pathname = url.pathname.replace(/\/+$/, '');
+  const lastSegment = pathname.split('/').filter(Boolean).pop();
+  if (!lastSegment) {
+    return fallback;
+  }
+  const withoutQuery = lastSegment.split('?')[0].split('#')[0];
+  const dotIndex = withoutQuery.lastIndexOf('.');
+  if (dotIndex > 0) {
+    const stem = withoutQuery.slice(0, dotIndex);
+    return stem || fallback;
+  }
+  return withoutQuery || fallback;
+}
+
+function reserveOutputName(map: Map<string, number>, hint: string): string {
+  const sanitized = sanitizeNameHint(hint, 'output');
+  const count = map.get(sanitized) ?? 0;
+  map.set(sanitized, count + 1);
+  if (count === 0) {
+    return sanitized;
+  }
+  return `${sanitized}-${count + 1}`;
 }

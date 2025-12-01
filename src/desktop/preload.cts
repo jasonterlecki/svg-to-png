@@ -30,6 +30,18 @@ const api: Svg2RasterApi = {
   requestCancel(): Promise<void> {
     return ipcRenderer.invoke('svg2raster:cancel');
   },
+  listPresets() {
+    return ipcRenderer.invoke('svg2raster:presets:list');
+  },
+  savePreset(payload) {
+    return ipcRenderer.invoke('svg2raster:presets:save', payload);
+  },
+  deletePreset(name) {
+    return ipcRenderer.invoke('svg2raster:presets:delete', name);
+  },
+  fetchRemoteSvg(url) {
+    return ipcRenderer.invoke('svg2raster:inputs:fetch-url', url);
+  },
 };
 
 contextBridge.exposeInMainWorld('svg2raster', api);

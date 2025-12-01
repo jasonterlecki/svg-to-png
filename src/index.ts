@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { BrowserRenderer } from './renderer/browserRenderer.js';
 import type { BrowserRenderJob } from './renderer/browserRenderer.js';
 import { readFile } from './utils/fileIO.js';
+import { fetchRemoteSvg } from './utils/network.js';
 import type { RenderOptions, RenderResult, SvgSource } from './types.js';
 
 export type { OutputFormat, RenderOptions, RenderResult, SvgSource } from './types.js';
@@ -49,6 +50,20 @@ export async function renderSvgFile(filePath: string, options: RenderOptions = {
     {
       svg,
       baseUrl: options.baseUrl ?? directoryUrl,
+    },
+    options,
+  );
+}
+
+export async function renderSvgUrl(url: string, options: RenderOptions = {}): Promise<RenderResult> {
+  const remote = await fetchRemoteSvg(url, {
+    timeoutMs: options.navigationTimeoutMs,
+  });
+
+  return renderSvg(
+    {
+      svg: remote.svg,
+      baseUrl: resolveBaseUrl(options.baseUrl, remote.baseUrl),
     },
     options,
   );

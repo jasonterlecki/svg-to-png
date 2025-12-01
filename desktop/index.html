@@ -36,6 +36,9 @@
         gap: 0.25rem;
         margin-bottom: 0.75rem;
       }
+      label small {
+        color: #666;
+      }
       input,
       select,
       textarea {
@@ -60,6 +63,16 @@
         opacity: 0.5;
         cursor: not-allowed;
       }
+      .input-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+      .input-row input {
+        flex: 1;
+        min-width: 200px;
+      }
       table {
         width: 100%;
         border-collapse: collapse;
@@ -70,6 +83,22 @@
         text-align: left;
         padding: 0.4rem;
         border-bottom: 1px solid #e0e0e0;
+      }
+      th:last-child,
+      td:last-child {
+        width: 1%;
+        white-space: nowrap;
+      }
+      .preset-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+      .preset-controls select {
+        flex: 1;
+      }
+      .preset-controls button {
+        flex: 0 0 auto;
       }
       .placeholder {
         text-align: center;
@@ -93,15 +122,25 @@
           <table>
             <thead>
               <tr>
-                <th>File</th>
+                <th>Source</th>
                 <th>Status</th>
+                <th></th>
               </tr>
             </thead>
             <tbody id="job-table-body">
-              <tr><td colspan="2" class="placeholder">No files selected.</td></tr>
+              <tr><td colspan="3" class="placeholder">No inputs queued.</td></tr>
             </tbody>
           </table>
         </div>
+        <div class="input-row">
+          <input id="url-input" type="url" placeholder="https://example.com/icon.svg" />
+          <button id="add-url" type="button">Download & add URL</button>
+        </div>
+        <label>
+          Paste SVG markup
+          <textarea id="raw-input" placeholder="<svg …>"></textarea>
+        </label>
+        <button id="add-raw" type="button">Add pasted SVG</button>
       </section>
       <section>
         <h2>Output</h2>
@@ -110,6 +149,17 @@
       </section>
       <section>
         <h2>Options</h2>
+        <label>
+          Preset
+          <div class="preset-controls">
+            <select id="preset-select">
+              <option value="">Manual settings</option>
+            </select>
+            <button id="save-preset" type="button">Save…</button>
+            <button id="delete-preset" type="button" disabled>Delete</button>
+          </div>
+          <small>Presets load from svg2raster.presets.json or ~/.config/svg2raster/.</small>
+        </label>
         <label>
           Format
           <select id="format">

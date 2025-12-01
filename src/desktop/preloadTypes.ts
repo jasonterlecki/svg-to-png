@@ -3,6 +3,9 @@ import type {
   UiConvertResult,
   UiProgressEvent,
   UiCompleteEvent,
+  UiPresetListResult,
+  UiPresetSavePayload,
+  UiFetchedUrlResult,
 } from './ipc.js';
 
 export interface Svg2RasterApi {
@@ -12,4 +15,8 @@ export interface Svg2RasterApi {
   onProgress(listener: (event: UiProgressEvent) => void): () => void;
   onComplete(listener: (event: UiCompleteEvent) => void): () => void;
   requestCancel(): Promise<void>;
+  listPresets(): Promise<UiPresetListResult>;
+  savePreset(payload: UiPresetSavePayload): Promise<UiPresetListResult>;
+  deletePreset(name: string): Promise<UiPresetListResult>;
+  fetchRemoteSvg(url: string): Promise<UiFetchedUrlResult>;
 }
