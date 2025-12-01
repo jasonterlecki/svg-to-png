@@ -1,30 +1,37 @@
 # svg-to-png
 
-A Playwright-powered toolkit for turning SVG assets into raster formats (PNG, JPEG, WebP) without sacrificing CSS fidelity or advanced SVG features. The project exposes both a Node.js library API and a CLI tailored for batch conversion workflows.
+SVG → raster toolkit with a typed Node.js API, a feature-complete CLI, and an Electron desktop app. Rendering is delegated to Playwright’s Chromium so that CSS, gradients, fonts, and advanced SVG features are preserved. JPEG/WebP outputs are produced via Sharp.
+
+## Table of Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+  - [CLI](#cli-quick-start)
+  - [Desktop App](#desktop-app-quick-start)
+  - [Library API](#library-quick-start)
+- [CLI Usage](#cli-usage)
+- [Desktop App](#desktop-app)
+- [Library API](#library-api)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [Releases](#releases)
 
 ## Features
 
-- Uses a real Chromium browser (via Playwright) so inline styles, `<style>` blocks, fonts, gradients, filters, and `foreignObject` regions render exactly as modern browsers do.
-- Supports multiple output formats: PNG natively and JPEG/WebP via Sharp post-processing.
-- Accepts inline SVG strings or filesystem paths with automatic base URL resolution for relative assets.
-- Provides fine-grained rendering controls (width, height, scale, timestamp for animations, injected CSS, external CSS blocking, etc.).
-- Handles multi-frame SVGs by seeking to a timestamp before capturing the screenshot.
+- **Library**: `renderSvg`, `renderSvgFile`, and `shutdownRenderer` with animation timestamps, CSS injection, base URLs, Sharp-powered JPEG/WebP conversion, and automatic Chromium installation.
+- **CLI (`svg2raster`)**: Globs, output directories/files, format/dimension overrides, scale, background, CSS injection, animation timestamp, concurrency limits, per-file progress, and graceful cancellation (Ctrl+C).
+- **Desktop App**: Electron UI that mirrors CLI options, shows per-file status, and enables cancelling active batches.
+- **Reliability**: If Chromium is missing, the renderer automatically downloads it into `node_modules/playwright-core/.local-browsers`.
+- **Tested**: Vitest suite covers utilities, CLI logic, and renderer behavior (with auto-install fallback).
 
-Refer to `AGENT.md` for the full product spec and roadmap.
+## Requirements
 
-## Prerequisites
-
-- **Node.js** ≥ 20 (ES modules and top-level `await` are in use).
-- **npm** (or another package manager) to install dependencies.
-- **Playwright browser binaries**. Install Chromium once via:
-
-  ```bash
-  npx playwright install --with-deps chromium
-  ```
-
-  This downloads the sandboxed Chromium binary Playwright expects. Run it after cloning the repo or whenever Playwright is updated.
-
-- **Sharp native dependencies**. Sharp bundles prebuilt binaries for most platforms, but Linux distributions may require `libvips`/build tools. The Sharp [installation guide](https://sharp.pixelplumbing.com/install) lists the required packages.
+- Node.js **20.x** (ESM and optional chaining are used).
+- npm (or pnpm/yarn) for installing dependencies.
+- The first conversion will download Playwright’s Chromium (~170 MB). Subsequent runs reuse the local cache.
+- Linux/macOS/Windows; Electron desktop app currently targets Linux/macOS (Windows support planned via electron-builder).
 
 ## Installation
 
@@ -32,140 +39,198 @@ Refer to `AGENT.md` for the full product spec and roadmap.
 git clone https://github.com/jasonterlecki/svg-to-png.git
 cd svg-to-png
 npm install
+```
+
+The CLI and desktop app both run from the workspace. You do **not** need to run `playwright install` manually; the renderer runs it automatically if Chromium is missing. If you prefer to preinstall:
+
+```bash
 npx playwright install --with-deps chromium
 ```
 
-Build artifacts (generated when you install or run `npm run build`) end up in `dist/`.
+## Quick Start
 
-## Usage (library)
-
-The public API exposes `renderSvg`, `renderSvgFile`, and `shutdownRenderer`. Example:
-
-```ts
-import { renderSvg, renderSvgFile } from 'svg-to-png';
-
-// Render inline markup to PNG
-const result = await renderSvg({
-  svg: `<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stop-color="#f90" />
-              <stop offset="100%" stop-color="#f06" />
-            </linearGradient>
-          </defs>
-          <rect width="64" height="64" fill="url(#grad)" />
-        </svg>`,
-}, { format: 'png', scale: 2 });
-
-await renderSvgFile('path/to/logo.svg', {
-  format: 'webp',
-  width: 256,
-  extraCss: 'svg { background: #fff; }',
-});
-```
-
-`renderSvgFile` infers a `baseUrl` from the file location so relative `<link>`/`<image>` references resolve correctly. When you are done rendering (e.g., in test suites), call `shutdownRenderer()` to close the shared Playwright browser instance.
-
-### Rendering options
-
-| Option | Type | Description |
-| --- | --- | --- |
-| `width`, `height` | `number` | Overrides for the rendered viewport. When only one dimension is provided the aspect ratio comes from the SVG `viewBox`/attributes. |
-| `scale` | `number` | Device pixel ratio (`1` = normal, `2` = “@2x”). |
-| `background` | `string` | CSS color or `"transparent"` (default). Non-transparent backgrounds are applied before Sharp re-encodes JPEG/WebP. |
-| `format` | `"png" \| "jpeg" \| "webp"` | Output format. PNG is rendered directly; JPEG/WebP are derived from the PNG buffer via Sharp. |
-| `time` | `number` | Timestamp (seconds) for animated SVGs. The renderer seeks before capturing the screenshot. |
-| `extraCss` | `string` | Raw CSS injected inside a `<style>` block before rendering. |
-| `baseUrl` | `string` | Used to resolve relative URLs (defaults to the file directory for `renderSvgFile`). |
-| `allowExternalStyles` | `boolean` | Set to `false` to block non-data stylesheet requests for locked-down environments. |
-| `navigationTimeoutMs` | `number` | Overrides the navigation/asset loading timeout (default 15 s). |
-
-### Environment variables
-
-| Variable | Meaning |
-| --- | --- |
-| `SVG2RASTER_CHROMIUM_PATH` | Absolute path to an existing Chromium/Chrome binary. Falls back to Playwright’s bundled browser. |
-| `SVG2RASTER_FORCE_MINIMAL_CHROMIUM=1` | Forces the renderer to use the constrained flag set (`--single-process`, `--no-zygote`, etc.) if your environment requires it. By default the renderer tries a standard launch first before falling back automatically. |
-
-## CLI usage
-
-After running `npm run build`, you can execute the CLI via `node dist/cli.js` (the published package exposes `svg2raster` via the `bin` entry). Examples:
+### CLI Quick Start
 
 ```bash
-# Single file with an explicit output path
-node dist/cli.js assets/logo.svg --out dist/logo.png --scale 2
+# Convert a single SVG to PNG
+node dist/cli.js assets/logo.svg --out dist/logo.png
 
-# Batch conversion using a glob – outputs end up in dist/icons with inferred names
-node dist/cli.js "icons/**/*.svg" --out-dir dist/icons --format webp --concurrency 4
-
-# Prevent external stylesheet loads and inject custom CSS
-node dist/cli.js badge.svg --out dist/badge.jpeg --disable-external-styles --css styles/fonts.css
+# Convert a directory to WebP at 2× scale
+node dist/cli.js "icons/**/*.svg" --out-dir dist/icons --format webp --scale 2
 ```
 
-Conversions now show per-file progress (`[1/5] ✔ icon.svg → dist/icon.png`) and can be cancelled cleanly with `Ctrl+C` (press twice to force immediate exit). The CLI reports a summary at the end, including any failed files.
+While running, the CLI prints per-file progress (e.g., `[3/12] ✔ icon.svg → dist/icon.png`). Press `Ctrl+C` once to cancel gracefully (remaining jobs are skipped). Press again to force exit.
 
-Available options:
-
-| Option | Description |
-| --- | --- |
-| `<inputs...>` | One or more SVG file paths or glob patterns. Quote glob patterns so your shell does not expand them. |
-| `-o, --out <file>` | Output file path (only when processing a single input). |
-| `--out-dir <dir>` | Destination directory for batch conversion. The original filenames are preserved, but the extension changes to match the output format. |
-| `-f, --format <png|jpeg|webp>` | Output format (default `png`). JPEG outputs use the standard `.jpg` extension. |
-| `-w, --width <px>` / `-h, --height <px>` | Override the rendered dimensions. If one dimension is omitted, the SVG aspect ratio determines the other. |
-| `-s, --scale <factor>` | Device pixel ratio (e.g., `2` for “@2x”). |
-| `-b, --background <color>` | Background color or `"transparent"` (default). |
-| `--css <file>` | Additional CSS file to inject before rendering (useful for custom fonts). |
-| `-t, --time <seconds>` | Timestamp for capturing animated SVGs. |
-| `--concurrency <count>` | Parallel render jobs (default is derived from CPU count). |
-| `--disable-external-styles` | Blocks external stylesheet requests referenced by the SVG. |
-| `--silent` / `--verbose` | Control CLI logging verbosity. |
-
-All CLI options ultimately map to the same rendering options described in the library section, so refer there for further detail. The CLI automatically shuts down the shared Playwright browser once all jobs finish.
-
-## Desktop app
-
-Prefer a visual interface? Launch the Electron desktop experience after building:
+### Desktop App Quick Start
 
 ```bash
 npm run desktop
 ```
 
-The app lets you pick SVG files, view a per-file status table, choose an output directory, tweak format/dimension/scale/background/time options, and run conversions while viewing live progress. You can cancel an active batch via the new “Cancel” button. It shares the same rendering engine under the hood, so Playwright’s Chromium binary must still be installed (`npx playwright install --with-deps chromium`).
+Steps:
 
-### Electron structure
+1. Click **Select SVG files…** (multiple selection supported).
+2. Choose an output directory.
+3. Adjust options (format, width/height, scale, background, animation time, CSS injection, disable external styles).
+4. Click **Convert**. Progress updates in the table. Use **Cancel** to stop current batches.
 
-- `src/desktop/main.ts` – Electron main process that wires IPC handlers and executes the renderer.
-- `src/desktop/preload.ts` – Exposes a secure API to the renderer window.
-- `src/desktop/renderer.ts` + `desktop/index.html` – The UI for selecting files, specifying options, and triggering conversions.
+### Library Quick Start
 
-When you run `npm run desktop`, the TypeScript build runs first, then Electron boots the compiled files from `dist/desktop/`.
+```ts
+import { renderSvgFile } from 'svg-to-png/dist/index.js';
+import { writeFile } from 'node:fs/promises';
 
-## Development workflow
+const result = await renderSvgFile('assets/badge.svg', {
+  format: 'jpeg',
+  width: 256,
+  background: '#fff',
+  extraCss: '@font-face { ... }',
+  time: 0.5,
+});
 
-| Command | Purpose |
-| --- | --- |
-| `npm run lint` | ESLint over `src/` and `tests/`. |
-| `npm run test` | Vitest test suite (unit + integration). Browser integration tests skip automatically if Chromium cannot launch (e.g., in restricted sandboxes). |
-| `npm run build` | TypeScript compilation to `dist/`. |
-| `npm run clean` | Remove `dist/`. |
+await writeFile('badge.jpg', result.buffer);
+await shutdownRenderer(); // optional, useful in long-lived processes
+```
 
-### Running tests locally
+## CLI Usage
 
-1. Make sure Chromium is installed (`npx playwright install --with-deps chromium`).
-2. Ensure your environment allows Playwright to launch headless Chromium. If it fails with sandboxed errors, re-run tests with:
-   ```bash
-   SVG2RASTER_FORCE_MINIMAL_CHROMIUM=1 npm test
-   ```
-3. For CI or non-GUI servers, you may also need to install additional system dependencies listed in the [Playwright docs](https://playwright.dev/docs/ci).
+Run `node dist/cli.js --help` (after `npm run build`) or use the npm bin entry once published.
+
+```bash
+Usage: svg2raster [options] <inputs...>
+
+Convert SVG assets to PNG/JPEG/WebP using a headless Chromium renderer.
+
+Arguments:
+  inputs                 Input SVG paths or glob patterns (quote globs)
+
+Options:
+  -o, --out <file>       Output file path (single input only)
+  --out-dir <dir>        Output directory for batch conversion
+  -f, --format <fmt>     png (default), jpeg (saved as .jpg), or webp
+  -w, --width <px>       Target width in pixels
+  -h, --height <px>      Target height in pixels
+  -s, --scale <factor>   Device pixel ratio (e.g., 2 for @2x)
+  -b, --background <c>   Background color or "transparent"
+  --css <file>           Extra CSS file to inject before rendering
+  -t, --time <seconds>   Animation timestamp (seconds)
+  --concurrency <n>      Parallel render jobs (default: CPU limited)
+  --disable-external-styles   Block external stylesheets
+  --silent               Suppress info logs
+  --verbose              Extra logging
+  --help                 Show help
+```
+
+### CLI Notes
+
+- Globs are powered by `fast-glob`; wrap them in quotes to avoid shell expansion.
+- JPEG outputs use `.jpg` extensions automatically.
+- Progress lines look like `[4/10] ✔ icon.svg → dist/icon.jpg (JPEG 128x128, 115ms)`.
+- First Ctrl+C requests cancellation, second Ctrl+C exits immediately with code 130.
+- Exit codes: `0` success, `1` failure (at least one file failed), `130` forced cancellation.
+
+## Desktop App
+
+`npm run desktop` builds the TypeScript files and launches Electron. Features:
+
+- **Inputs panel**: select multiple SVGs; the table lists each file with live status.
+- **Output**: choose the destination directory.
+- **Options**: same as CLI (format, width, height, scale, background, animation time, CSS injection, disable external styles).
+- **Controls**: Convert (start batch), Cancel (stop active renders), status message area.
+
+The app is hardened for sandboxed environments (GPU disabled, minimal logging). Chromium is downloaded into `node_modules/playwright-core/.local-browsers` if missing.
+
+### Building for Distribution
+
+Packaging via `electron-builder` is planned (NEXTTASK5). For now, run from source (`npm run desktop`). To distribute, bundle the repo or use `electron-builder` manually.
+
+## Library API
+
+```ts
+import type {
+  OutputFormat,
+  RenderOptions,
+  RenderResult,
+  SvgSource,
+} from 'svg-to-png/dist/index.js';
+```
+
+### Types
+
+```ts
+type OutputFormat = 'png' | 'jpeg' | 'webp';
+
+interface RenderOptions {
+  width?: number;
+  height?: number;
+  scale?: number;
+  background?: string;          // "transparent" or CSS color
+  format?: OutputFormat;
+  time?: number;                // animation timestamp (seconds)
+  extraCss?: string;
+  baseUrl?: string;
+  allowExternalStyles?: boolean;
+  navigationTimeoutMs?: number;
+}
+
+interface RenderResult {
+  buffer: Buffer;
+  width: number;
+  height: number;
+  format: OutputFormat;
+}
+
+interface SvgSource {
+  svg: string;
+  baseUrl?: string;
+}
+```
+
+### Functions
+
+- `renderSvg(source: SvgSource, options?: RenderOptions): Promise<RenderResult>`
+- `renderSvgFile(path: string, options?: RenderOptions): Promise<RenderResult>`
+- `shutdownRenderer(): Promise<void>` – close the shared Playwright browser (useful in tests or short-lived scripts).
 
 ## Troubleshooting
 
-- **Chromium crashes immediately** – Verify you installed the Playwright browsers. If the default launch still fails, set `SVG2RASTER_FORCE_MINIMAL_CHROMIUM=1`.
-- **JPEG/WebP outputs look wrong** – Provide a solid `background` color for JPEG/WebP when the original SVG contains transparency; JPEG cannot represent alpha channels.
-- **External CSS doesn’t load** – Make sure `baseUrl` points to a directory or URL that allows relative paths to resolve, and leave `allowExternalStyles` enabled (default).
-- **“Executable doesn’t exist” errors** – Browsers now download into the project’s `node_modules` (instead of `~/.cache`), and the tool auto-runs `playwright install chromium` if the binary is missing. If installation fails (e.g., no network), rerun `npx playwright install --with-deps chromium` manually.
+- **Chromium missing / “executable doesn’t exist”**  
+  The renderer now auto-installs Chromium into `node_modules/playwright-core/.local-browsers`. If installation fails (e.g., no network), rerun `npx playwright install --with-deps chromium` manually.
 
-## License
+- **Linux GPU / GLib warnings**  
+  The desktop app launches with GPU disabled; some GLib warnings can still appear from Chromium. They’re harmless unless the app crashes. If crashes persist, ensure the host has the necessary `libnss3`, `libgtk-3`, `libx11` packages.
 
-MIT. See `LICENSE` (coming soon) or the header within `package.json`.
+- **Conversions fail on JPEG/WebP**  
+  JPEG doesn’t support transparency. Set `--background #fff` (CLI) or fill the background in the desktop app.
+
+- **External CSS doesn’t load**  
+  Ensure `baseUrl` (library) or the file’s directory (CLI/desktop) has the referenced styles/images. Use `--disable-external-styles` when you need sandboxed behavior.
+
+- **Slow first run**  
+  Downloading Playwright’s browser is the slowest step. Subsequent runs are much faster.
+
+## Development
+
+Scripts:
+
+- `npm run build` – TypeScript compilation (outputs to `dist/`).
+- `npm run lint` – ESLint (ESM config).
+- `npm run test` – Vitest suite (includes CLI + renderer tests).
+- `npm run desktop` – Build + launch Electron app.
+
+When contributing:
+
+1. `npm install`
+2. `npm run lint && npm test`
+3. `npm run build`
+4. Update docs/tests alongside code changes.
+
+Electron/CLI rely on Playwright; CI or fresh machines must allow auto-install or run `npx playwright install --with-deps chromium`.
+
+## Releases
+
+- **v1.0.0** – Initial implementation (Library + CLI scaffold).
+- **v1.0.1** – Desktop app, progress/cancel, README expansion.
+- **v1.0.2** – Auto-install Chromium, `.jpg` extension for JPEG, cancellation/progress polish.
+
+See `NEXTTASK*.md` for upcoming work: presets, URL/raw input support, CI, packaging, richer UI features.

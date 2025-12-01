@@ -9,6 +9,14 @@ The output should be easy to use both from the command line and as a programmati
 
 ---
 
+## Current Status (v1.0.2)
+
+- **Library**: `renderSvg` / `renderSvgFile` built on Playwright + Sharp. Supports CSS injection, animation timestamps, base URLs, and automatically installs Chromium into `node_modules` if the browser cache is missing.
+- **CLI (`svg2raster`)**: Globs, output directories, per-file progress, graceful cancellation, JPEG outputs using `.jpg`, CSS injection, animation time, concurrency, and logging controls.
+- **Desktop app**: Electron UI with per-file status table, cancel button, progress updates via IPC, fully GPU-disabled for sandbox safety.
+- **Tests**: Vitest suite covering utilities, CLI, renderer; renderer tests auto-install browsers when necessary and skip gracefully when Chromium can’t launch.
+- **Docs**: README plus NEXTTASK docs (presets, URL support, CI, packaging). Troubleshooting covers Playwright cache behavior and auto-installation.
+
 ## High-Level Requirements
 
 1. **Core functionality**
@@ -376,4 +384,3 @@ Before considering the implementation complete, ensure that:
 * [ ] Documentation exists in `README.md` showing how to use both the CLI and the library API.
 
 ```
-
