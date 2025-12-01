@@ -164,6 +164,7 @@ When you run `npm run desktop`, the TypeScript build runs first, then Electron b
 - **Chromium crashes immediately** – Verify you installed the Playwright browsers. If the default launch still fails, set `SVG2RASTER_FORCE_MINIMAL_CHROMIUM=1`.
 - **JPEG/WebP outputs look wrong** – Provide a solid `background` color for JPEG/WebP when the original SVG contains transparency; JPEG cannot represent alpha channels.
 - **External CSS doesn’t load** – Make sure `baseUrl` points to a directory or URL that allows relative paths to resolve, and leave `allowExternalStyles` enabled (default).
+- **“Executable doesn’t exist” errors** – Playwright stores Chromium under `~/.cache/ms-playwright`. If that folder gets cleared (e.g., after reinstalling dependencies or on a fresh machine), rerun `npx playwright install --with-deps chromium` to download the browser again.
 
 ## License
 
