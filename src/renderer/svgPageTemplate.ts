@@ -1,4 +1,14 @@
-export function buildSvgPage(svg: string): string {
+export interface SvgPageTemplateOptions {
+  extraCss?: string;
+  background?: string;
+}
+
+export function buildSvgPage(svg: string, options: SvgPageTemplateOptions = {}): string {
+  const extraCssBlock = options.extraCss
+    ? `<style id="svg2raster-extra-css">${options.extraCss}</style>`
+    : '';
+  const background = options.background ?? 'transparent';
+
   return `<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -9,9 +19,13 @@ export function buildSvgPage(svg: string): string {
       body {
         margin: 0;
         padding: 0;
-        background: transparent;
+        background: ${background};
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
     </style>
+    ${extraCssBlock}
   </head>
   <body>
     ${svg}

@@ -24,6 +24,7 @@ export default [
     },
     rules: {
       ...tsRecommended.rules,
+      'no-undef': 'off',
     },
   },
   prettierConfig,
