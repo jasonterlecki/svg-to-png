@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import type { OpenDialogReturnValue } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { UiConvertRequest, UiConvertResult } from './ipc.js';
 import { renderSvgFile, shutdownRenderer } from '../index.js';
 
@@ -14,13 +14,16 @@ app.commandLine.appendSwitch('disable-gpu-compositing');
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
+  const preloadPath = path.join(__dirname, 'preload.js');
+  const preloadUrl = pathToFileURL(preloadPath).href;
   mainWindow = new BrowserWindow({
     width: 960,
     height: 720,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: preloadUrl,
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
     },
     title: 'SVG to Raster',
   });
