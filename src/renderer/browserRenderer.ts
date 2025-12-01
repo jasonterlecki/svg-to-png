@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { chromium, type Browser, type LaunchOptions } from 'playwright';
 import { DEFAULT_NAVIGATION_TIMEOUT_MS, SUPPORTED_FORMATS } from '../config.js';
 import { buildSvgPage } from './svgPageTemplate.js';
@@ -22,36 +23,49 @@ export class BrowserRenderer {
 
   private async getBrowser(): Promise<Browser> {
     if (!this.browserPromise) {
-      const { headless = true, launchOptions } = this.options;
-      const defaultArgs = [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-software-rasterizer',
-        '--disable-crash-reporter',
-        '--single-process',
-        '--no-zygote',
-      ];
-      const mergedArgs = [...defaultArgs, ...(launchOptions?.args ?? [])];
+      this.browserPromise = this.launchBrowser().catch((error) => {
+        this.browserPromise = undefined;
+        throw error;
+      });
+    }
 
-      this.browserPromise = chromium
-        .launch({
+    return this.browserPromise;
+  }
+
+  private async launchBrowser(): Promise<Browser> {
+    const { headless = true, launchOptions } = this.options;
+    const baseArgs = ['--no-sandbox', '--disable-setuid-sandbox'];
+    const constrainedArgs = [
+      ...baseArgs,
+      '--disable-dev-shm-usage',
+      '--disable-software-rasterizer',
+      '--disable-crash-reporter',
+      '--single-process',
+      '--no-zygote',
+    ];
+
+    const forceConstrained = process.env.SVG2RASTER_FORCE_MINIMAL_CHROMIUM === '1';
+    const attemptArgsList = forceConstrained ? [constrainedArgs] : [baseArgs, constrainedArgs];
+    let lastError: unknown;
+
+    for (const candidateArgs of attemptArgsList) {
+      try {
+        return await chromium.launch({
           headless,
           ...launchOptions,
-          args: mergedArgs,
+          args: [...candidateArgs, ...(launchOptions?.args ?? [])],
           chromiumSandbox: false,
           executablePath:
             launchOptions?.executablePath ??
             process.env.SVG2RASTER_CHROMIUM_PATH ??
             chromium.executablePath(),
-        })
-        .catch((error) => {
-          this.browserPromise = undefined;
-          throw error;
         });
+      } catch (error) {
+        lastError = error;
+      }
     }
 
-    return this.browserPromise;
+    throw lastError instanceof Error ? lastError : new Error('Failed to launch Chromium');
   }
 
   async close(): Promise<void> {
