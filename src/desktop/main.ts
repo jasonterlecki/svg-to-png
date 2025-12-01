@@ -7,6 +7,10 @@ import type { UiConvertRequest, UiConvertResult } from './ipc.js';
 import { renderSvgFile, shutdownRenderer } from '../index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-software-rasterizer');
+app.commandLine.appendSwitch('disable-gpu-compositing');
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
