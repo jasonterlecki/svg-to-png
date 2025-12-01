@@ -1,3 +1,4 @@
+import '../setupPlaywrightEnv.js';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -10,9 +11,6 @@ import type { OutputFormat, RenderOptions, RenderResult } from '../types.js';
 import { convertPngBuffer } from '../utils/raster.js';
 
 const require = createRequire(import.meta.url);
-if (!process.env.PLAYWRIGHT_BROWSERS_PATH) {
-  process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
-}
 
 export interface BrowserRendererOptions {
   headless?: boolean;

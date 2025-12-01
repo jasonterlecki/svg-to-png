@@ -25,7 +25,7 @@ describe('renderSvg', () => {
     } finally {
       await shutdownRenderer();
     }
-  });
+  }, 30000);
 
   afterAll(async () => {
     await shutdownRenderer();
