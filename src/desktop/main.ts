@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import type { OpenDialogReturnValue } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,11 +50,11 @@ ipcMain.handle('svg2raster:choose-files', async () => {
     return [];
   }
 
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = (await dialog.showOpenDialog(mainWindow, {
     title: 'Select SVG files',
     properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'SVG', extensions: ['svg'] }],
-  });
+  })) as unknown as OpenDialogReturnValue;
 
   if (result.canceled) {
     return [];
@@ -67,10 +68,10 @@ ipcMain.handle('svg2raster:choose-directory', async () => {
     return null;
   }
 
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = (await dialog.showOpenDialog(mainWindow, {
     title: 'Select output directory',
     properties: ['openDirectory', 'createDirectory'],
-  });
+  })) as unknown as OpenDialogReturnValue;
 
   if (result.canceled || result.filePaths.length === 0) {
     return null;
