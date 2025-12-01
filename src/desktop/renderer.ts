@@ -7,6 +7,7 @@ declare global {
   }
 }
 
+const api = window.svg2raster ?? null;
 const selectFilesBtn = document.getElementById('select-files') as HTMLButtonElement | null;
 const filesSummary = document.getElementById('selected-files') as HTMLDivElement | null;
 const selectOutputBtn = document.getElementById('select-output') as HTMLButtonElement | null;
@@ -26,7 +27,11 @@ let selectedFiles: string[] = [];
 let outputDirectory: string | null = null;
 
 selectFilesBtn?.addEventListener('click', async () => {
-  const files = await window.svg2raster.chooseInputFiles();
+  if (!api) {
+    showStatus('Renderer bridge unavailable.', 'error');
+    return;
+  }
+  const files = await api.chooseInputFiles();
   if (files.length > 0) {
     selectedFiles = files;
     updateFilesSummary();
@@ -34,7 +39,11 @@ selectFilesBtn?.addEventListener('click', async () => {
 });
 
 selectOutputBtn?.addEventListener('click', async () => {
-  const directory = await window.svg2raster.chooseOutputDirectory();
+  if (!api) {
+    showStatus('Renderer bridge unavailable.', 'error');
+    return;
+  }
+  const directory = await api.chooseOutputDirectory();
   if (directory) {
     outputDirectory = directory;
     updateOutputSummary();
@@ -47,12 +56,17 @@ convertBtn?.addEventListener('click', async () => {
     return;
   }
 
+  if (!api) {
+    showStatus('Renderer bridge unavailable.', 'error');
+    return;
+  }
+
   convertBtn.disabled = true;
   showStatus('Rendering…', 'info');
 
   const options = buildRenderOptions();
   try {
-    const result = await window.svg2raster.convert({
+    const result = await api.convert({
       inputPaths: selectedFiles,
       outputDir: outputDirectory,
       options,
