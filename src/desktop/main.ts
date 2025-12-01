@@ -49,16 +49,25 @@ app.on('window-all-closed', () => {
   }
 });
 
-ipcMain.handle('svg2raster:choose-files', async () => {
-  if (!mainWindow) {
-    return [];
-  }
+function getActiveWindow(): BrowserWindow | null {
+  return BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+}
 
-  const result = (await dialog.showOpenDialog(mainWindow, {
-    title: 'Select SVG files',
-    properties: ['openFile', 'multiSelections'],
-    filters: [{ name: 'SVG', extensions: ['svg'] }],
-  })) as unknown as OpenDialogReturnValue;
+ipcMain.handle('svg2raster:choose-files', async () => {
+  const active = getActiveWindow();
+  const dialogPromise = active
+    ? dialog.showOpenDialog(active, {
+        title: 'Select SVG files',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'SVG', extensions: ['svg'] }],
+      })
+    : dialog.showOpenDialog({
+        title: 'Select SVG files',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'SVG', extensions: ['svg'] }],
+      });
+
+  const result = (await dialogPromise) as unknown as OpenDialogReturnValue;
 
   if (result.canceled) {
     return [];
@@ -68,14 +77,18 @@ ipcMain.handle('svg2raster:choose-files', async () => {
 });
 
 ipcMain.handle('svg2raster:choose-directory', async () => {
-  if (!mainWindow) {
-    return null;
-  }
+  const active = getActiveWindow();
+  const dialogPromise = active
+    ? dialog.showOpenDialog(active, {
+        title: 'Select output directory',
+        properties: ['openDirectory', 'createDirectory'],
+      })
+    : dialog.showOpenDialog({
+        title: 'Select output directory',
+        properties: ['openDirectory', 'createDirectory'],
+      });
 
-  const result = (await dialog.showOpenDialog(mainWindow, {
-    title: 'Select output directory',
-    properties: ['openDirectory', 'createDirectory'],
-  })) as unknown as OpenDialogReturnValue;
+  const result = (await dialogPromise) as unknown as OpenDialogReturnValue;
 
   if (result.canceled || result.filePaths.length === 0) {
     return null;
