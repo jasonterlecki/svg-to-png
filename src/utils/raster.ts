@@ -38,6 +38,17 @@ export async function convertPngBuffer(
         )
         .webp({ lossless: true })
         .toBuffer();
+    case 'avif':
+      return sharp(input)
+        .flatten(
+          backgroundColor
+            ? {
+                background: backgroundColor,
+              }
+            : undefined,
+        )
+        .avif({ lossless: true })
+        .toBuffer();
     default:
       throw new Error(`Unsupported output format "${options.format}"`);
   }

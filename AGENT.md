@@ -11,11 +11,11 @@ The output should be easy to use both from the command line and as a programmati
 
 ## Current Status (v1.0.2)
 
-- **Library**: `renderSvg` / `renderSvgFile` built on Playwright + Sharp. Supports CSS injection, animation timestamps, base URLs, and automatically installs Chromium into `node_modules` if the browser cache is missing.
+- **Library**: `renderSvg` / `renderSvgFile` built on Playwright + Sharp. Supports CSS injection, animation timestamps, base URLs, and automatically installs Chromium into `node_modules` if the browser cache is missing. Raster exports include PNG, JPEG, WebP, and AVIF.
 - **CLI (`svg2raster`)**: Globs, output directories, per-file progress, graceful cancellation, JPEG outputs using `.jpg`, CSS injection, animation time, concurrency, logging controls, preset loading via `--preset/--list-presets`, and support for HTTP(S) URLs, STDIN, or raw inline SVG.
 - **Desktop app**: Electron UI with per-file status table, cancel button, progress updates via IPC, preset dropdown with save/delete actions, URL downloader, pasted SVG input area, fully GPU-disabled for sandbox safety.
 - **Tests**: Vitest suite covering utilities, CLI, renderer; renderer tests auto-install browsers when necessary and skip gracefully when Chromium can’t launch.
-- **Docs**: README plus NEXTTASK docs (presets, URL support, CI, packaging). Troubleshooting covers Playwright cache behavior and auto-installation; presets documented with file locations.
+- **Docs/CI**: README plus NEXTTASK docs (presets, URL support, CI, packaging). Troubleshooting covers Playwright cache behavior and auto-installation; presets documented with file locations. GitHub Actions workflow runs lint/test/build on pushes + PRs.
 
 ## High-Level Requirements
 

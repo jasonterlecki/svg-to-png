@@ -10,7 +10,6 @@ import type {
   UiCompleteEvent,
   UiPresetListResult,
   UiPresetSavePayload,
-  UiInputSource,
   UiFetchedUrlResult,
 } from './ipc.js';
 import { renderSvg, renderSvgFile, shutdownRenderer } from '../index.js';
@@ -22,6 +21,12 @@ import {
   savePresetEntry,
 } from '../presets.js';
 import { fetchRemoteSvg } from '../utils/network.js';
+import {
+  deriveNameFromUrl,
+  normalizeInputs,
+  reserveOutputName,
+  sanitizeNameHint,
+} from './conversionUtils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -219,29 +224,8 @@ ipcMain.handle('svg2raster:inputs:fetch-url', async (_event, url: string): Promi
 });
 
 function normalizeRequest(request: UiConvertRequest): UiConvertRequest {
-  const normalizedInputs: UiInputSource[] = [];
-  const seenFilePaths = new Set<string>();
-  for (const input of request.inputs ?? []) {
-    if (input.type === 'file') {
-      const absolutePath = path.resolve(input.path);
-      if (seenFilePaths.has(absolutePath)) {
-        continue;
-      }
-      seenFilePaths.add(absolutePath);
-      normalizedInputs.push({
-        ...input,
-        path: absolutePath,
-        nameHint: sanitizeNameHint(input.nameHint, path.parse(absolutePath).name || 'output'),
-      });
-    } else if (input.type === 'inline' && input.svg.trim()) {
-      normalizedInputs.push({
-        ...input,
-        nameHint: sanitizeNameHint(input.nameHint, 'inline'),
-      });
-    }
-  }
   return {
-    inputs: normalizedInputs,
+    inputs: normalizeInputs(request.inputs ?? []),
     outputDir: path.resolve(request.outputDir),
     options: request.options,
   };
@@ -341,40 +325,4 @@ function toUiPresets(entries: PresetEntry[]) {
     description: entry.description,
     options: entry.options,
   }));
-}
-
-function sanitizeNameHint(value: string | undefined, fallback: string): string {
-  if (!value) {
-    return fallback;
-  }
-  const cleaned = value
-    .trim()
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return cleaned || fallback;
-}
-
-function deriveNameFromUrl(url: URL, fallback: string): string {
-  const pathname = url.pathname.replace(/\/+$/, '');
-  const lastSegment = pathname.split('/').filter(Boolean).pop();
-  if (!lastSegment) {
-    return fallback;
-  }
-  const withoutQuery = lastSegment.split('?')[0].split('#')[0];
-  const dotIndex = withoutQuery.lastIndexOf('.');
-  if (dotIndex > 0) {
-    const stem = withoutQuery.slice(0, dotIndex);
-    return stem || fallback;
-  }
-  return withoutQuery || fallback;
-}
-
-function reserveOutputName(map: Map<string, number>, hint: string): string {
-  const sanitized = sanitizeNameHint(hint, 'output');
-  const count = map.get(sanitized) ?? 0;
-  map.set(sanitized, count + 1);
-  if (count === 0) {
-    return sanitized;
-  }
-  return `${sanitized}-${count + 1}`;
 }

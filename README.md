@@ -21,7 +21,7 @@ SVG → raster toolkit with a typed Node.js API, a feature-complete CLI, and an 
 
 ## Features
 
-- **Library**: `renderSvg`, `renderSvgFile`, and `shutdownRenderer` with animation timestamps, CSS injection, base URLs, Sharp-powered JPEG/WebP conversion, and automatic Chromium installation.
+- **Library**: `renderSvg`, `renderSvgFile`, and `shutdownRenderer` with animation timestamps, CSS injection, base URLs, Sharp-powered JPEG/WebP/AVIF conversion, and automatic Chromium installation.
 - **CLI (`svg2raster`)**: Globs, output directories/files, format/dimension overrides, scale, background, CSS injection, animation timestamp, concurrency limits, per-file progress, and graceful cancellation (Ctrl+C).
 - **Desktop App**: Electron UI that mirrors CLI options, shows per-file status, enables cancelling active batches, and now accepts URLs or pasted SVG markup.
 - **Reliability**: If Chromium is missing, the renderer automatically downloads it into `node_modules/playwright-core/.local-browsers`.
@@ -149,7 +149,7 @@ Arguments:
 Options:
   -o, --out <file>       Output file path (single input only)
   --out-dir <dir>        Output directory for batch conversion
-  -f, --format <fmt>     png (default), jpeg (saved as .jpg), or webp
+  -f, --format <fmt>     png (default), jpeg (saved as .jpg), webp, or avif
   -w, --width <px>       Target width in pixels
   -h, --height <px>      Target height in pixels
   -s, --scale <factor>   Device pixel ratio (e.g., 2 for @2x)
@@ -172,7 +172,7 @@ Options:
 ### CLI Notes
 
 - Globs are powered by `fast-glob`; wrap them in quotes to avoid shell expansion.
-- JPEG outputs use `.jpg` extensions automatically.
+- JPEG outputs use `.jpg` extensions automatically, and AVIF outputs use `.avif`.
 - Progress lines look like `[4/10] ✔ icon.svg → dist/icon.jpg (JPEG 128x128, 115ms)`.
 - HTTP(S) URLs are detected automatically; combine them with file globs or `--url` for explicit entries.
 - `--stdin` reads a single SVG payload from STDIN, so you can pipe from `curl`, `cat`, or other generators.
@@ -267,8 +267,16 @@ Scripts:
 
 - `npm run build` – TypeScript compilation (outputs to `dist/`).
 - `npm run lint` – ESLint (ESM config).
-- `npm run test` – Vitest suite (includes CLI + renderer tests).
+- `npm run test` – Vitest suite covering CLI utilities, renderer logic, and desktop conversion helpers.
 - `npm run desktop` – Build + launch Electron app.
+
+### Continuous Integration
+
+GitHub Actions runs lint → test → build on every push/PR (`.github/workflows/ci.yml`). The workflow:
+
+1. Installs dependencies via `npm ci`.
+2. Caches Playwright’s Chromium binaries (`~/.cache/ms-playwright`) and installs them with `npx playwright install --with-deps chromium`.
+3. Runs `npm run lint`, `npm test`, and `npm run build`.
 
 When contributing:
 

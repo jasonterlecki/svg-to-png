@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 
-export type OutputFormat = 'png' | 'jpeg' | 'webp';
+export type OutputFormat = 'png' | 'jpeg' | 'webp' | 'avif';
 
 export interface RenderOptions {
   width?: number;
